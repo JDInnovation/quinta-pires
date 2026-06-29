@@ -1,0 +1,12 @@
+# Backends / infra que NÃO são deployed pelo Vercel
+functions
+worker
+.agents
+.firebase
+firebase.json
+.firebaserc
+
+# Artefactos
+node_modules
+dist
+*.log
