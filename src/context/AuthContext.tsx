@@ -1,10 +1,9 @@
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
-  getRedirectResult,
   onAuthStateChanged,
   setPersistence,
-  signInWithRedirect,
+  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
@@ -32,11 +31,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(false);
     });
 
-    // Conclui o fluxo de signInWithRedirect quando o utilizador regressa.
-    getRedirectResult(auth).catch((error) => {
-      console.error("Falha ao concluir o login por redirect.", error);
-    });
-
     return unsubscribe;
   }, []);
 
@@ -47,7 +41,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       signInWithGoogle: async () => {
         await setPersistence(auth, browserLocalPersistence);
         const provider = new GoogleAuthProvider();
-        await signInWithRedirect(auth, provider);
+        await signInWithPopup(auth, provider);
       },
       signOut: async () => {
         await signOut(auth);
