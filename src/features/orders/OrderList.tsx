@@ -522,7 +522,7 @@ const OrderList: React.FC<OrderListProps> = ({
       ) : (
         <>
           <div className="table-wrapper">
-            <table className="simple-table">
+            <table className="simple-table responsive-cards">
               <thead>
                 <tr>
                   <th scope="col" style={{ width: 36 }}>
@@ -557,7 +557,7 @@ const OrderList: React.FC<OrderListProps> = ({
               return (
                 <React.Fragment key={order.id}>
                   <tr className={selectedIds.has(order.id) ? "row-selected" : ""}>
-                    <td>
+                    <td className="cell-check" data-label="Selecionar">
                       <input
                         type="checkbox"
                         checked={selectedIds.has(order.id)}
@@ -565,9 +565,9 @@ const OrderList: React.FC<OrderListProps> = ({
                         aria-label={`Selecionar encomenda de ${customerName}`}
                       />
                     </td>
-                    <td>{formatDate(order.date)}</td>
-                    <td>{customerName}</td>
-                    <td>
+                    <td data-label="Data">{formatDate(order.date)}</td>
+                    <td data-label="Cliente">{customerName}</td>
+                    <td data-label="Estado">
                       {onChangeStatus ? (
                         <select
                           value={order.status}
@@ -590,14 +590,14 @@ const OrderList: React.FC<OrderListProps> = ({
                         )?.label ?? "—"
                       )}
                     </td>
-                    <td>{description}</td>
-                    <td>
+                    <td data-label="Resumo">{description}</td>
+                    <td data-label="Total">
                       {total.toLocaleString("pt-PT", {
                         style: "currency",
                         currency: "EUR",
                       })}
                     </td>
-                    <td>
+                    <td className="cell-actions">
                       <div className="table-actions">
                         <button
                           type="button"

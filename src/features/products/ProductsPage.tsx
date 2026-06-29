@@ -291,7 +291,7 @@ const ProductsPage: React.FC = () => {
         </div>
 
         <div className="table-wrapper">
-          <table className="simple-table products-table">
+          <table className="simple-table products-table responsive-cards">
             <thead>
               <tr>
                 <th>Nome</th>
@@ -308,7 +308,7 @@ const ProductsPage: React.FC = () => {
 
                 return (
                   <tr key={p.id}>
-                    <td>
+                    <td data-label="Nome">
                       <input
                         className="inline-input"
                         value={d?.name ?? p.name}
@@ -317,10 +317,10 @@ const ProductsPage: React.FC = () => {
                         }
                       />
                     </td>
-                    <td>
+                    <td data-label="ID">
                       <code className="mono">{p.id}</code>
                     </td>
-                    <td>
+                    <td data-label="Unidade">
                       <select
                         className="inline-select"
                         value={(d?.unit ?? p.unit) as string}
@@ -335,7 +335,7 @@ const ProductsPage: React.FC = () => {
                         <option value="molho">molho</option>
                       </select>
                     </td>
-                    <td>
+                    <td data-label="Preço">
                       <input
                         className="inline-input inline-number"
                         value={d?.price ?? String(p.price ?? 0)}
@@ -347,7 +347,7 @@ const ProductsPage: React.FC = () => {
                       />
                       <span className="price-suffix">€</span>
                     </td>
-                    <td>
+                    <td className="cell-actions">
                       <div className="row-actions">
                         <button
                           type="button"

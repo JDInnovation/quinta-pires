@@ -86,7 +86,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
       </div>
 
       <div className="table-wrapper">
-        <table className="simple-table">
+        <table className="simple-table responsive-cards">
           <thead>
             <tr>
               <th scope="col">Nome</th>
@@ -107,12 +107,12 @@ const CustomerList: React.FC<CustomerListProps> = ({
             ) : (
               pageCustomers.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td>{c.nif ?? "—"}</td>
-                  <td>{c.address}</td>
-                  <td>{c.phone ?? "—"}</td>
-                  <td>{c.notes ?? "—"}</td>
-                  <td>
+                  <td data-label="Nome">{c.name}</td>
+                  <td data-label="NIF">{c.nif ?? "—"}</td>
+                  <td data-label="Morada">{c.address}</td>
+                  <td data-label="Telefone">{c.phone ?? "—"}</td>
+                  <td data-label="Notas">{c.notes ?? "—"}</td>
+                  <td className="cell-actions">
                     <div className="table-actions">
                       {onEdit && (
                         <button

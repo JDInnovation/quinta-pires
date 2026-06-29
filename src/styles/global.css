@@ -790,6 +790,113 @@ button {
   background: rgba(74, 222, 128, 0.06) !important;
 }
 
+/* Responsive "card" tables on mobile */
+@media (max-width: 768px) {
+  .responsive-cards thead {
+    display: none;
+  }
+
+  .responsive-cards,
+  .responsive-cards tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-cards tr {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0.55rem 0.85rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .responsive-cards tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .responsive-cards td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    padding: 0.4rem 0;
+    border-bottom: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .responsive-cards td:last-child {
+    border-bottom: none;
+  }
+
+  .responsive-cards td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    text-align: left;
+  }
+
+  /* Inline editable inputs/selects fill the value side */
+  .responsive-cards td .inline-input,
+  .responsive-cards td .inline-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+  }
+
+  /* Status select in orders */
+  .responsive-cards td select {
+    max-width: 60%;
+  }
+
+  /* Actions span the full width as a button row */
+  .responsive-cards td.cell-actions {
+    justify-content: stretch;
+    padding-top: 0.55rem;
+  }
+
+  .responsive-cards td.cell-actions::before {
+    content: none;
+  }
+
+  .responsive-cards td.cell-actions .table-actions,
+  .responsive-cards td.cell-actions .row-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .responsive-cards td.cell-actions .table-actions > *,
+  .responsive-cards td.cell-actions .row-actions > * {
+    flex: 1 1 auto;
+  }
+
+  /* Checkbox cell */
+  .responsive-cards td.cell-check {
+    justify-content: space-between;
+  }
+
+  /* Full-width cells (empty states, expanded order details) */
+  .responsive-cards td[colspan] {
+    display: block;
+    text-align: center;
+    padding: 0.6rem 0;
+  }
+
+  .responsive-cards td[colspan]::before {
+    content: none;
+  }
+
+  .responsive-cards .order-details-row td {
+    text-align: left;
+  }
+}
+
 /* Status pills */
 .status-pill {
   display: inline-flex;
@@ -2998,8 +3105,19 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
+  .import-validation-image-block {
+    position: sticky;
+    top: -0.8rem;
+    z-index: 5;
+    background: var(--bg-card);
+    padding: 0.55rem 0 0.6rem;
+    margin: 0;
+    box-shadow: 0 10px 16px -10px rgba(0, 0, 0, 0.55);
+    border-bottom: 1px solid var(--border);
+  }
+
   .import-validation-image {
-    max-height: 320px;
+    max-height: 38vh;
   }
 
   .import-line-row {
@@ -3007,8 +3125,17 @@ input[type="checkbox"] {
   }
 
   .import-validation-actions {
-    position: static;
+    position: sticky;
+    bottom: -0.8rem;
     flex-wrap: wrap;
+    padding: 0.6rem 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+  }
+
+  .import-validation-actions .btn-primary,
+  .import-validation-actions .btn-secondary {
+    flex: 1 1 auto;
   }
 }
 
