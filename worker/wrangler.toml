@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2026-06-28"
 
 [vars]
-ALLOWED_ORIGINS = "http://localhost:5173"
+ALLOWED_ORIGINS = "http://localhost:5173,https://quinta-pires.vercel.app"
 OPENAI_MODEL = "gpt-4.1-mini"
 MAX_IMAGES_PER_REQUEST = "3"
 RATE_LIMIT_WINDOW_SECONDS = "60"
