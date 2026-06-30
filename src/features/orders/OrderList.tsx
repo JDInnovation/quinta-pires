@@ -75,6 +75,19 @@ function parseDateToMs(dateStr?: string): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
+function createdAtToMs(createdAt?: Order["createdAt"]): number {
+  if (createdAt == null) return Number.POSITIVE_INFINITY; // acabada de criar (sem timestamp ainda) → topo
+  if (typeof createdAt === "number") return createdAt;
+  if (typeof createdAt === "string") {
+    const ms = new Date(createdAt).getTime();
+    return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
+  }
+  if (typeof createdAt === "object" && typeof createdAt.seconds === "number") {
+    return createdAt.seconds * 1000 + (createdAt.nanoseconds ?? 0) / 1e6;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function startOfDayMs(dateStr?: string): number | null {
   const ms = parseDateToMs(dateStr);
   if (ms == null) return null;
@@ -232,14 +245,18 @@ const OrderList: React.FC<OrderListProps> = ({
       return true;
     });
 
-    // Ordena por data da encomenda (mais recentes primeiro).
-    // Se quiseres o inverso, troca para `aMs - bMs`.
+    // Ordena sempre por ordem de criação (mais recentes primeiro),
+    // independentemente dos filtros aplicados.
     return filtered.slice().sort((a, b) => {
-      const aMs = parseDateToMs(a.date) ?? -Infinity;
-      const bMs = parseDateToMs(b.date) ?? -Infinity;
+      const aMs = createdAtToMs(a.createdAt);
+      const bMs = createdAtToMs(b.createdAt);
       if (aMs !== bMs) return bMs - aMs;
 
-      // desempate: entrega (mais recente primeiro), depois ID
+      // desempate: data da encomenda, entrega, depois ID
+      const aDate = parseDateToMs(a.date) ?? -Infinity;
+      const bDate = parseDateToMs(b.date) ?? -Infinity;
+      if (aDate !== bDate) return bDate - aDate;
+
       const aDel = parseDateToMs(a.deliveryDate) ?? -Infinity;
       const bDel = parseDateToMs(b.deliveryDate) ?? -Infinity;
       if (aDel !== bDel) return bDel - aDel;

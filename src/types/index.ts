@@ -37,5 +37,6 @@ export interface Order {
   items: OrderItem[];
   status: OrderStatus;
   notes?: string;
+  createdAt?: { seconds: number; nanoseconds: number } | number | string;
 }
 
