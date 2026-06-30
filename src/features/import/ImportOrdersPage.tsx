@@ -721,10 +721,12 @@ const ImportOrdersPage: React.FC = () => {
       const quantity = Number(item.quantity) || 0;
       if (quantity <= 0) return;
 
+      const validatedUnit = (item.unit ?? "").trim();
+
       orderItems.push({
         productId: item.productId,
         quantity,
-        unit: product.unit,
+        unit: (validatedUnit || product.unit) as Order["items"][number]["unit"],
         unitPrice: product.price,
       });
     });
