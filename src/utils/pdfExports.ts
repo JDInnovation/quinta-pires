@@ -108,10 +108,35 @@ function buildQtyString(
     .join(" + ");
 }
 
-function collectUniqueNotes(orders: Order[]): string[] {
-  return Array.from(
-    new Set(orders.map((o) => (o.notes ?? "").trim()).filter(Boolean)),
+// Referencia interna gerada pela importacao IA (ex: "Importacao IA: abc123").
+const IMPORT_ID_RE = /Importa[çc][ãa]o\s*IA:\s*([^\s|]+)/i;
+
+/** Notas visiveis (sem o segmento tecnico "Importacao IA: <id>"). */
+function collectDisplayNotes(orders: Order[]): string[] {
+  const notes = orders.map((o) =>
+    (o.notes ?? "")
+      .split("|")
+      .map((part) => part.trim())
+      .filter((part) => part && !IMPORT_ID_RE.test(part))
+      .join(" | ")
+      .trim(),
   );
+  return Array.from(new Set(notes.filter(Boolean)));
+}
+
+/** IDs de referencia da importacao IA presentes nas notas das encomendas. */
+function collectImportRefIds(orders: Order[]): string[] {
+  const ids = new Set<string>();
+  orders.forEach((o) => {
+    (o.notes ?? "")
+      .split("|")
+      .map((part) => part.trim())
+      .forEach((part) => {
+        const match = part.match(IMPORT_ID_RE);
+        if (match) ids.add(match[1]);
+      });
+  });
+  return Array.from(ids);
 }
 
 /* ================================================================
@@ -334,7 +359,15 @@ export async function exportCustomerSheetsPdf(
   const today = new Date().toLocaleDateString("pt-PT");
   let first = true;
 
-  byCustomer.forEach((custOrders, cid) => {
+  const customerNameById = new Map(customers.map((c) => [c.id, c.name] as const));
+  const sortedCustomerEntries = Array.from(byCustomer.entries()).sort((a, b) =>
+    (customerNameById.get(a[0]) ?? "Cliente desconhecido").localeCompare(
+      customerNameById.get(b[0]) ?? "Cliente desconhecido",
+      "pt-PT",
+    ),
+  );
+
+  sortedCustomerEntries.forEach(([cid, custOrders]) => {
     if (!first) doc.addPage();
     first = false;
 
@@ -372,11 +405,11 @@ export async function exportCustomerSheetsPdf(
       infoY += 14;
     }
 
-    // NIF — smaller / muted
+    // NIF — destacado (usado para faturacao)
     if (c?.nif) {
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(...BRAND.muted);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...BRAND.dark);
       doc.text(`NIF: ${c.nif}`, 52, infoY);
       infoY += 14;
     }
@@ -422,7 +455,18 @@ export async function exportCustomerSheetsPdf(
       },
     });
 
-    renderNotesBlock(doc, collectUniqueNotes(custOrders), warningImg);
+    renderNotesBlock(doc, collectDisplayNotes(custOrders), warningImg);
+
+    // Referencia interna da importacao IA no rodape da pagina do cliente
+    const importRefIds = collectImportRefIds(custOrders);
+    if (importRefIds.length) {
+      const ph = doc.internal.pageSize.getHeight();
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...BRAND.muted);
+      doc.text(`Ref. importacao IA: ${importRefIds.join(", ")}`, 40, ph - 32);
+      doc.setTextColor(...BRAND.text);
+    }
   });
 
   drawFooter(doc);

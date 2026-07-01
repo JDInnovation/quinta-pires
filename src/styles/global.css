@@ -2439,6 +2439,30 @@ input[type="checkbox"] {
   gap: 0.6rem;
 }
 
+.import-catalog-upload {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.import-catalog-upload h3 {
+  font-size: 0.88rem;
+}
+
+.import-catalog-upload textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.import-catalog-upload button {
+  align-self: flex-start;
+}
+
 .import-weekly-create h3 {
   font-size: 0.88rem;
 }
@@ -3051,6 +3075,30 @@ input[type="checkbox"] {
 .confidence-low {
   color: #ef4444;
   font-weight: 700;
+}
+
+/* Desktop: mantem o print sempre visivel e da scroll proprio aos produtos */
+@media (min-width: 769px) {
+  .import-validation-image-block {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: calc(92vh - 5rem);
+    overflow: auto;
+  }
+
+  .import-validation-image {
+    max-height: calc(92vh - 9rem);
+  }
+
+  .import-lines-editor {
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem;
+  }
 }
 
 @media (max-width: 768px) {

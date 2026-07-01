@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { createAiOrderImportService } from "../../services/aiOrderImportService";
 import { optimizeImageForAi } from "../../services/imageOptimization";
+import { parseCatalogText } from "./catalogParser";
 import { useConfirm } from "../../components/ConfirmProvider";
 import type {
   CorrectedOrderDraft,
@@ -154,28 +155,96 @@ function buildDefaultWeeklyProducts(
   }));
 }
 
+// Extrai os componentes de uma quantidade (ex: "1kg+1kg" -> [1, 1]).
+// Se nao houver soma explicita, usa o valor ja calculado como componente unico.
+function parseQuantityComponents(rawText: string | null | undefined, fallback: number): number[] {
+  const parts = (rawText ?? "")
+    .split("+")
+    .map((part) => {
+      const match = part.match(/\d+(?:[.,]\d+)?/);
+      return match ? Number(match[0].replace(",", ".")) : NaN;
+    })
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (parts.length >= 2) return parts;
+  return [fallback];
+}
+
+function formatQtyComponent(n: number): string {
+  const isInt = Math.abs(n - Math.round(n)) < 1e-9;
+  return isInt ? String(Math.round(n)) : String(n).replace(".", ",");
+}
+
 function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
   const analysis = record.analysisResult;
+  const rawItems = analysis?.order.items ?? [];
+
+  // Agrupa produtos repetidos (varias linhas do mesmo produto ou "1kg+1kg").
+  type Group = {
+    productId: string;
+    productNameRaw: string;
+    unit: string;
+    confidence: number;
+    notes: string | null;
+    components: number[];
+  };
+  const groups = new Map<string, Group>();
+  const order: string[] = [];
+
+  for (const item of rawItems) {
+    const key = (item.productId || item.productNameNormalized || item.productNameRaw || "")
+      .trim()
+      .toLowerCase();
+    const components = parseQuantityComponents(item.rawQuantityText, item.quantity);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.components.push(...components);
+      existing.confidence = Math.min(existing.confidence, item.confidence);
+    } else {
+      groups.set(key, {
+        productId: item.productId || "",
+        productNameRaw: item.productNameRaw,
+        unit: item.unit,
+        confidence: item.confidence,
+        notes: item.notes,
+        components: [...components],
+      });
+      order.push(key);
+    }
+  }
+
+  const items = order.map((key) => {
+    const g = groups.get(key)!;
+    return {
+      productId: g.productId,
+      quantity: g.components.reduce((a, b) => a + b, 0),
+      unit: g.unit,
+      productNameRaw: g.productNameRaw,
+      confidence: g.confidence,
+      notes: g.notes,
+    };
+  });
+
+  // Nota em capslock com o detalhe dos produtos que vieram repetidos/somados.
+  const breakdownParts = order
+    .map((key) => groups.get(key)!)
+    .filter((g) => g.components.length > 1)
+    .map((g) => `${g.productNameRaw.toUpperCase().trim()} ${g.components.map(formatQtyComponent).join("+")}`);
+
+  const notesLines = [...(analysis?.order.generalNotes ?? [])];
+  if (breakdownParts.length) notesLines.push(breakdownParts.join(" --- "));
+
   return {
     customerId: analysis?.customer.matchedCustomerId ?? null,
     phoneDetected: analysis?.customer.phoneRaw ?? null,
     displayNameDetected: analysis?.customer.displayName ?? null,
-    items:
-      analysis?.order.items.map((item) => ({
-        productId: item.productId || "",
-        quantity: item.quantity,
-        unit: item.unit,
-        productNameRaw: item.productNameRaw,
-        confidence: item.confidence,
-        notes: item.notes,
-      })) ?? [],
-    notes: (analysis?.order.generalNotes ?? []).join("\n"),
+    items,
+    notes: notesLines.join("\n"),
   };
 }
 
 const ImportOrdersPage: React.FC = () => {
   const confirm = useConfirm();
-  const { products, loadingProducts } = useProducts();
+  const { products, loadingProducts, bulkUpsertProducts } = useProducts();
   const { customers } = useCustomers();
   const { createOrder } = useOrders();
 
@@ -191,6 +260,9 @@ const ImportOrdersPage: React.FC = () => {
 
   const [newCatalogLabel, setNewCatalogLabel] = useState("");
   const [newCatalogProducts, setNewCatalogProducts] = useState<Set<string>>(new Set());
+
+  const [catalogText, setCatalogText] = useState("");
+  const [importingCatalog, setImportingCatalog] = useState(false);
 
   const [selectedValidationId, setSelectedValidationId] = useState<string | null>(null);
   const [validationModalOpen, setValidationModalOpen] = useState(false);
@@ -503,6 +575,40 @@ const ImportOrdersPage: React.FC = () => {
       toast.error("Nao foi possivel apagar as encomendas.");
     }
   }, [reviewRows, confirm]);
+
+  const handleImportCatalogText = async () => {
+    const parsed = parseCatalogText(catalogText);
+    if (!parsed.length) {
+      toast.error("Nao foi possivel encontrar produtos com preco no catalogo colado.");
+      return;
+    }
+
+    const ok = await confirm({
+      title: "Substituir produtos pelo catalogo?",
+      message: `Vao ficar apenas os ${parsed.length} produto(s) deste catalogo. Todos os outros produtos serao apagados.`,
+      confirmLabel: "Substituir",
+      cancelLabel: "Cancelar",
+      tone: "danger",
+    });
+    if (!ok) return;
+
+    try {
+      setImportingCatalog(true);
+      const { created, updated, removed } = await bulkUpsertProducts(
+        parsed.map((p) => ({ name: p.name, unit: p.unit, price: p.price })),
+        { replace: true },
+      );
+      toast.success(
+        `Catalogo importado: ${created} novo(s), ${updated} atualizado(s), ${removed} removido(s).`,
+      );
+      setCatalogText("");
+    } catch (err) {
+      console.error(err);
+      toast.error("Nao foi possivel importar o catalogo.");
+    } finally {
+      setImportingCatalog(false);
+    }
+  };
 
   const handleCreateWeeklyCatalog = async () => {
     const label = newCatalogLabel.trim();
@@ -891,6 +997,32 @@ const ImportOrdersPage: React.FC = () => {
         </div>
 
         <div className="import-active-products"><strong>Produtos ativos nesta configuracao: </strong><span>{activeWeeklyProducts.length}</span></div>
+
+        <div className="import-catalog-upload">
+          <h3>Importar catalogo da semana</h3>
+          <p className="muted-hint">
+            Cola aqui a lista da semana (formato WhatsApp). Ao importar, a lista de produtos passa a
+            ser SO este catalogo (os restantes sao apagados) e os precos sao usados pela IA e nas
+            folhas por cliente.
+          </p>
+          <div className="field">
+            <label>Catalogo (colar texto)</label>
+            <textarea
+              rows={6}
+              value={catalogText}
+              onChange={(e) => setCatalogText(e.target.value)}
+              placeholder={"\uD83C\uDF3f Lista da Semana \u2014 Quinta Pires\n\uD83C\uDF45 Tomate salada \u2014 1,50\u20ac/kg\n\uD83E\uDD51 Courgette \u2014 1,50\u20ac/kg\n..."}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={importingCatalog || loadingProducts || !catalogText.trim()}
+            onClick={handleImportCatalogText}
+          >
+            {importingCatalog ? "A importar..." : "Importar catalogo"}
+          </button>
+        </div>
 
         {catalogMode === "weekly_catalog" && (
           <div className="import-weekly-create">

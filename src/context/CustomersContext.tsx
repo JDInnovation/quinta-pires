@@ -18,6 +18,10 @@ interface CustomersContextValue {
 
 const CustomersContext = createContext<CustomersContextValue | undefined>(undefined);
 
+function sortByName(list: Customer[]): Customer[] {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, "pt-PT"));
+}
+
 export const CustomersProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
@@ -26,7 +30,7 @@ export const CustomersProvider: React.FC<{ children: ReactNode }> = ({ children 
     (async () => {
       try {
         const data = await fetchCustomers();
-        setCustomers(data);
+        setCustomers(sortByName(data));
       } catch (err) {
         console.error("Erro ao carregar clientes:", err);
         toast.error("Não foi possível carregar clientes.");
@@ -38,13 +42,13 @@ export const CustomersProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const handleCreateCustomer = async (data: Omit<Customer, "id">) => {
     const created = await apiCreateCustomer(data);
-    setCustomers((prev) => [created, ...prev]);
+    setCustomers((prev) => sortByName([created, ...prev]));
     toast.success(`Cliente "${data.name}" criado.`);
   };
 
   const handleUpdateCustomer = async (id: string, data: Omit<Customer, "id">) => {
     await apiUpdateCustomer(id, data);
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { id, ...data } : c)));
+    setCustomers((prev) => sortByName(prev.map((c) => (c.id === id ? { id, ...data } : c))));
     toast.success(`Cliente "${data.name}" atualizado.`);
   };
 
