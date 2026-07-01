@@ -333,6 +333,9 @@ async function callOpenAi(env: Env, payload: AnalyzePayload): Promise<unknown> {
     "You analyze WhatsApp order screenshots and return strict JSON.",
     "Never include markdown or prose outside JSON.",
     "Do not invent products outside active catalog unless clearly identified as unknown.",
+    "Each catalog product may include an 'aliases' list and there is a 'learnedAliases' map (canonical -> aliases) built from past human validations.",
+    "When the raw text matches (case/accent-insensitive) a product alias or learned alias, map it to that product's productId with high confidence.",
+    "Prefer these learned aliases over guessing; they encode previous corrections.",
     "Set requiresValidation=true whenever confidence is not high or any ambiguity exists.",
   ].join(" ");
 

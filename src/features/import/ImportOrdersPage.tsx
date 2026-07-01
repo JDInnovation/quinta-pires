@@ -10,19 +10,22 @@ import {
   createWeeklyCatalog,
   deleteOrderImportRecord,
   listOrderImports,
+  listProductAliases,
   listWeeklyCatalogs,
   patchOrderImport,
   logAiLearningEntry,
+  upsertProductAlias,
 } from "./api";
 import { createAiOrderImportService } from "../../services/aiOrderImportService";
 import { optimizeImageForAi } from "../../services/imageOptimization";
-import { parseCatalogText } from "./catalogParser";
+import { parseCatalogText, normalizeProductName } from "./catalogParser";
 import { useConfirm } from "../../components/ConfirmProvider";
 import type {
   CorrectedOrderDraft,
   ImportCatalogMode,
   ImportStatus,
   OrderImportRecord,
+  ProductAlias,
   WeeklyCatalog,
   WeeklyCatalogProduct,
 } from "./types";
@@ -264,6 +267,8 @@ const ImportOrdersPage: React.FC = () => {
   const [catalogText, setCatalogText] = useState("");
   const [importingCatalog, setImportingCatalog] = useState(false);
 
+  const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
+
   const [selectedValidationId, setSelectedValidationId] = useState<string | null>(null);
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [draftById, setDraftById] = useState<Record<string, CorrectedOrderDraft>>({});
@@ -285,12 +290,29 @@ const ImportOrdersPage: React.FC = () => {
     [catalogs, selectedCatalogId],
   );
 
+  const aliasesByProductId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    // productAliases ja vem ordenado por count desc (mais frequentes primeiro)
+    productAliases.forEach((a) => {
+      if (!a.productId || !a.displayText) return;
+      const list = map.get(a.productId) ?? [];
+      if (list.length < 8 && !list.includes(a.displayText)) list.push(a.displayText);
+      map.set(a.productId, list);
+    });
+    return map;
+  }, [productAliases]);
+
   const activeWeeklyProducts = useMemo(() => {
-    if (catalogMode === "existing_products") {
-      return buildDefaultWeeklyProducts(products).filter((p) => p.isActive);
-    }
-    return (selectedCatalog?.products ?? []).filter((p) => p.isActive);
-  }, [catalogMode, products, selectedCatalog]);
+    const base =
+      catalogMode === "existing_products"
+        ? buildDefaultWeeklyProducts(products).filter((p) => p.isActive)
+        : (selectedCatalog?.products ?? []).filter((p) => p.isActive);
+    return base.map((p) => {
+      const learned = aliasesByProductId.get(p.productId) ?? [];
+      const merged = Array.from(new Set([...(p.aliases ?? []), ...learned]));
+      return { ...p, aliases: merged };
+    });
+  }, [catalogMode, products, selectedCatalog, aliasesByProductId]);
 
   const customersByNormalizedPhone = useMemo(() => {
     const map = new Map<string, string>();
@@ -351,11 +373,16 @@ const ImportOrdersPage: React.FC = () => {
     setImports(rows);
   }, []);
 
+  const refreshAliases = useCallback(async () => {
+    const rows = await listProductAliases();
+    setProductAliases(rows);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        await Promise.all([refreshCatalogs(), refreshImports()]);
+        await Promise.all([refreshCatalogs(), refreshImports(), refreshAliases()]);
       } catch (err) {
         console.error(err);
         toast.error("Nao foi possivel carregar dados da importacao.");
@@ -363,7 +390,7 @@ const ImportOrdersPage: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [refreshCatalogs, refreshImports]);
+  }, [refreshCatalogs, refreshImports, refreshAliases]);
 
   const updateLocalRecord = useCallback((id: string, patch: Partial<OrderImportRecord>) => {
     setImports((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -904,6 +931,47 @@ const ImportOrdersPage: React.FC = () => {
         });
       } catch (logErr) {
         console.warn("Falha ao registar aprendizagem da IA", logErr);
+      }
+
+      // Aprendizagem real: guarda pares "texto do print -> produto" (aliases)
+      // a partir da validacao, para a IA acertar nas proximas importacoes.
+      try {
+        const seen = new Set<string>();
+        const aliasWrites: Array<Promise<void>> = [];
+
+        const queueAlias = (rawText: string, productId: string) => {
+          const raw = (rawText || "").trim();
+          if (!raw || !productId) return;
+          const product = productsById.get(productId);
+          if (!product) return;
+          const aliasText = normalizeProductName(raw);
+          const canonical = normalizeProductName(product.name);
+          // So guarda variacoes uteis (diferentes do nome do produto).
+          if (!aliasText || aliasText === canonical || seen.has(aliasText)) return;
+          seen.add(aliasText);
+          aliasWrites.push(
+            upsertProductAlias({
+              aliasText,
+              displayText: raw,
+              productId: product.id,
+              productName: product.name,
+            }),
+          );
+        };
+
+        selectedDraft.items.forEach((item) => queueAlias(item.productNameRaw, item.productId));
+
+        (selectedRecord.analysisResult?.learningCandidates ?? []).forEach((cand) => {
+          const c = cand as Record<string, unknown>;
+          queueAlias(String(c.rawText ?? ""), String(c.normalizedProductId ?? ""));
+        });
+
+        if (aliasWrites.length) {
+          await Promise.all(aliasWrites);
+          void refreshAliases();
+        }
+      } catch (aliasErr) {
+        console.warn("Falha ao guardar aliases da IA", aliasErr);
       }
 
       await deleteOrderImportRecord(selectedRecord);

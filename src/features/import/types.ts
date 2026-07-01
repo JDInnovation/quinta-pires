@@ -153,3 +153,20 @@ export interface CreateAiLearningEntryInput {
   aiMode: string;
   aiModel: string;
 }
+
+export interface ProductAlias {
+  id: string;
+  aliasText: string;
+  displayText: string;
+  productId: string;
+  productName: string;
+  count: number;
+  updatedAt?: unknown;
+}
+
+export interface UpsertProductAliasInput {
+  aliasText: string;
+  displayText: string;
+  productId: string;
+  productName: string;
+}

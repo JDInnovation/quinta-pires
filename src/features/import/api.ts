@@ -4,8 +4,10 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  increment,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -20,11 +22,14 @@ import type {
   WeeklyCatalogProduct,
   AiLearningEntry,
   CreateAiLearningEntryInput,
+  ProductAlias,
+  UpsertProductAliasInput,
 } from "./types";
 
 const orderImportsCol = collection(db, "orderImports");
 const weeklyCatalogsCol = collection(db, "weeklyCatalogs");
 const aiLearningCol = collection(db, "aiLearningLog");
+const productAliasesCol = collection(db, "productAliases");
 
 function toOrderImportRecord(id: string, raw: Record<string, unknown>): OrderImportRecord {
   return {
@@ -183,6 +188,43 @@ export async function listAiLearningEntries(): Promise<AiLearningEntry[]> {
     const bMs = Number((b.createdAt as { seconds?: number })?.seconds ?? 0);
     return aMs - bMs;
   });
+}
+
+export async function listProductAliases(): Promise<ProductAlias[]> {
+  const snap = await getDocs(productAliasesCol);
+  const rows = snap.docs.map((d) => {
+    const raw = d.data() as Record<string, unknown>;
+    return {
+      id: d.id,
+      aliasText: String(raw.aliasText ?? ""),
+      displayText: String(raw.displayText ?? ""),
+      productId: String(raw.productId ?? ""),
+      productName: String(raw.productName ?? ""),
+      count: Number(raw.count ?? 0),
+      updatedAt: raw.updatedAt,
+    } satisfies ProductAlias;
+  });
+  return rows.sort((a, b) => b.count - a.count);
+}
+
+export async function upsertProductAlias(
+  input: UpsertProductAliasInput,
+): Promise<void> {
+  const id = input.aliasText.replace(/\s+/g, "-").slice(0, 140);
+  if (!id || !input.productId) return;
+  const ref = doc(productAliasesCol, id);
+  await setDoc(
+    ref,
+    {
+      aliasText: input.aliasText,
+      displayText: input.displayText,
+      productId: input.productId,
+      productName: input.productName,
+      count: increment(1),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function listWeeklyCatalogs(): Promise<WeeklyCatalog[]> {
