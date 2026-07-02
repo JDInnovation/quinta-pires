@@ -342,10 +342,12 @@ const ImportOrdersPage: React.FC = () => {
     [imports],
   );
 
-  const processingCount = useMemo(
-    () => imports.filter((row) => row.status === "PROCESSING").length,
+  const processingRows = useMemo(
+    () => imports.filter((row) => row.status === "PROCESSING"),
     [imports],
   );
+
+  const processingCount = processingRows.length;
 
   const selectedValidationIndex = useMemo(
     () => reviewRows.findIndex((row) => row.id === selectedValidationId),
@@ -564,6 +566,66 @@ const ImportOrdersPage: React.FC = () => {
       toast.error("Nao foi possivel apagar os prints.");
     }
   }, [pendingAnalysisRows, confirm]);
+
+  const deleteAllProcessing = useCallback(async () => {
+    if (!processingRows.length) {
+      toast("Nao ha prints em analise.");
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "Apagar prints em analise",
+      message: `Apagar ${processingRows.length} print(s) que ficaram em analise? Esta ação não pode ser revertida.`,
+      confirmLabel: "Apagar",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    const targets = [...processingRows];
+    const ids = new Set(targets.map((row) => row.id));
+
+    try {
+      await Promise.all(targets.map((row) => deleteOrderImportRecord(row)));
+      queueRef.current = queueRef.current.filter((entry) => !ids.has(entry.id));
+      setImports((prev) => prev.filter((row) => !ids.has(row.id)));
+      setPreviewById((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      toast.success("Prints em analise apagados.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Nao foi possivel apagar os prints em analise.");
+    }
+  }, [processingRows, confirm]);
+
+  const resetProcessingToPending = useCallback(async () => {
+    if (!processingRows.length) {
+      toast("Nao ha prints em analise.");
+      return;
+    }
+
+    const targets = [...processingRows];
+    try {
+      await Promise.all(
+        targets.map((row) =>
+          patchOrderImport(row.id, { status: "UPLOADED", errorMessage: null }),
+        ),
+      );
+      const ids = new Set(targets.map((row) => row.id));
+      queueRef.current = queueRef.current.filter((entry) => !ids.has(entry.id));
+      setImports((prev) =>
+        prev.map((row) =>
+          ids.has(row.id) ? { ...row, status: "UPLOADED", errorMessage: null } : row,
+        ),
+      );
+      toast.success("Prints repostos como por analisar. Podes voltar a analisar.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Nao foi possivel repor os prints.");
+    }
+  }, [processingRows]);
 
   const deleteAllReview = useCallback(async () => {
     if (!reviewRows.length) {
@@ -1217,6 +1279,64 @@ const ImportOrdersPage: React.FC = () => {
               </button>
             </div>
           </div>
+        )}
+        {!loading && processingRows.length > 0 && (
+          <details className="import-processing-panel" open>
+            <summary className="import-processing-summary">
+              <span className="import-spinner" aria-hidden="true" />
+              {processingRows.length} print(s) em analise
+            </summary>
+            <p className="muted-hint">
+              Prints que ficaram presos em analise (ex.: a pagina foi fechada durante o processo).
+              Podes repor para voltar a analisar, ou apagar.
+            </p>
+            <ul className="import-processing-list">
+              {processingRows.map((row) => (
+                <li key={row.id} className="import-processing-item">
+                  <span className="import-processing-name" title={row.fileName}>
+                    {row.fileName || row.id}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-danger import-processing-del"
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: "Apagar print em analise",
+                        message: `Apagar "${row.fileName || row.id}"? Esta ação não pode ser revertida.`,
+                        confirmLabel: "Apagar",
+                        tone: "danger",
+                      });
+                      if (!ok) return;
+                      try {
+                        await deleteOrderImportRecord(row);
+                        queueRef.current = queueRef.current.filter((entry) => entry.id !== row.id);
+                        setImports((prev) => prev.filter((r) => r.id !== row.id));
+                        setPreviewById((prev) => {
+                          const next = { ...prev };
+                          delete next[row.id];
+                          return next;
+                        });
+                        toast.success("Print apagado.");
+                      } catch (err) {
+                        console.error(err);
+                        toast.error("Nao foi possivel apagar o print.");
+                      }
+                    }}
+                  >
+                    Apagar
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="import-action-buttons">
+              <button type="button" className="btn-secondary" onClick={resetProcessingToPending}>
+                Repor como por analisar
+              </button>
+              <button type="button" className="btn-danger" onClick={deleteAllProcessing}>
+                Apagar todos em analise
+              </button>
+            </div>
+          </details>
         )}
       </section>
 
