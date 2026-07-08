@@ -51,6 +51,8 @@ export interface ImportedOrderAnalysis {
     phoneRaw: string | null;
     phoneNormalized: string | null;
     displayName: string | null;
+    addressRaw: string | null;
+    nifRaw: string | null;
     matchedCustomerId: string | null;
     matchConfidence: number;
     isNewCustomer: boolean;
@@ -70,6 +72,8 @@ export interface CorrectedOrderDraft {
   customerId: string | null;
   phoneDetected: string | null;
   displayNameDetected: string | null;
+  addressDetected: string | null;
+  nifDetected: string | null;
   items: Array<{
     productId: string;
     quantity: number;
@@ -77,6 +81,8 @@ export interface CorrectedOrderDraft {
     productNameRaw: string;
     confidence: number;
     notes: string | null;
+    newProductName?: string | null;
+    newProductPrice?: number | null;
   }>;
   notes: string;
 }

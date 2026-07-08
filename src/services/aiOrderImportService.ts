@@ -88,6 +88,8 @@ function buildMockResult(input: AnalyzePrintInput): ImportedOrderAnalysis {
       phoneRaw: null,
       phoneNormalized: null,
       displayName: null,
+      addressRaw: null,
+      nifRaw: null,
       matchedCustomerId: null,
       matchConfidence: randomConfidence(0.7),
       isNewCustomer: true,

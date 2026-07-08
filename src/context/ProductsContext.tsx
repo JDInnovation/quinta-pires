@@ -20,7 +20,7 @@ export interface CatalogUpsertItem {
 interface ProductsContextValue {
   products: Product[];
   loadingProducts: boolean;
-  createProduct: (data: Omit<Product, "id"> & { id?: string }) => Promise<void>;
+  createProduct: (data: Omit<Product, "id"> & { id?: string }) => Promise<Product>;
   updateProduct: (id: string, data: Omit<Product, "id">) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   bulkUpsertProducts: (
@@ -55,7 +55,7 @@ export const ProductsProvider: React.FC<{ children: ReactNode }> = ({ children }
     })();
   }, []);
 
-  const handleCreateProduct = async (data: Omit<Product, "id"> & { id?: string }) => {
+  const handleCreateProduct = async (data: Omit<Product, "id"> & { id?: string }): Promise<Product> => {
     const created = await apiCreateProduct(data);
     setProducts((prev) => {
       const next = [created, ...prev];
@@ -63,6 +63,7 @@ export const ProductsProvider: React.FC<{ children: ReactNode }> = ({ children }
       return next;
     });
     toast.success(`Produto "${data.name}" criado.`);
+    return created;
   };
 
   const handleUpdateProduct = async (id: string, data: Omit<Product, "id">) => {

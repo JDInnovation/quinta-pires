@@ -4,7 +4,6 @@ import type { Order } from "../../types";
 import { useCustomers } from "../../context/CustomersContext";
 import { useProducts } from "../../context/ProductsContext";
 import { useOrders } from "../../context/OrdersContext";
-import { createCustomer as apiCreateCustomer } from "../customers/api";
 import {
   createOrderImport,
   createWeeklyCatalog,
@@ -37,6 +36,10 @@ const MAX_IMAGES_PER_SELECTION = 50;
 // (base64, +~33%) dentro do proprio documento, por isso limitamos os bytes brutos.
 const MAX_FIRESTORE_IMAGE_BYTES = 600 * 1024;
 const UNIT_OPTIONS = ["kg", "un", "molho", "caixa", "saco", "outro"] as const;
+// Unidades reais suportadas pelo produto no catalogo (para "novo produto").
+const NEW_PRODUCT_UNITS = ["kg", "un", "molho"] as const;
+// Valor sentinela para uma linha de produto novo (fora do catalogo).
+const NEW_PRODUCT_ID = "__novo_produto__";
 
 const STATUS_LABELS: Record<ImportStatus, string> = {
   UPLOADED: "Pendente",
@@ -240,6 +243,8 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
     customerId: analysis?.customer.matchedCustomerId ?? null,
     phoneDetected: analysis?.customer.phoneRaw ?? null,
     displayNameDetected: analysis?.customer.displayName ?? null,
+    addressDetected: analysis?.customer.addressRaw ?? null,
+    nifDetected: analysis?.customer.nifRaw ?? null,
     items,
     notes: notesLines.join("\n"),
   };
@@ -247,8 +252,8 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
 
 const ImportOrdersPage: React.FC = () => {
   const confirm = useConfirm();
-  const { products, loadingProducts, bulkUpsertProducts } = useProducts();
-  const { customers } = useCustomers();
+  const { products, loadingProducts, bulkUpsertProducts, createProduct } = useProducts();
+  const { customers, createCustomer } = useCustomers();
   const { createOrder } = useOrders();
 
   const [weekId, setWeekId] = useState(currentWeekId());
@@ -275,6 +280,8 @@ const ImportOrdersPage: React.FC = () => {
   const [previewById, setPreviewById] = useState<Record<string, string>>({});
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
+  const [newCustomerNif, setNewCustomerNif] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [savingValidation, setSavingValidation] = useState(false);
 
   const queueRef = useRef<Array<{ id: string; weekId: string; imageDataUrl: string }>>([]);
@@ -319,6 +326,23 @@ const ImportOrdersPage: React.FC = () => {
     customers.forEach((customer) => {
       const normalized = normalizePhonePT(customer.phone ?? "");
       if (normalized) map.set(normalized, customer.id);
+    });
+    return map;
+  }, [customers]);
+
+  // Mapa por nome normalizado, para dar match quando nao ha numero de telefone.
+  // So guarda nomes unicos (ignora nomes duplicados para evitar match errado).
+  const customersByNormalizedName = useMemo(() => {
+    const counts = new Map<string, number>();
+    const map = new Map<string, string>();
+    customers.forEach((customer) => {
+      const key = normalizeProductName(customer.name ?? "");
+      if (!key) return;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      map.set(key, customer.id);
+    });
+    counts.forEach((count, key) => {
+      if (count > 1) map.delete(key);
     });
     return map;
   }, [customers]);
@@ -449,7 +473,13 @@ const ImportOrdersPage: React.FC = () => {
           });
 
           const normalizedPhone = normalizePhonePT(result.customer.phoneRaw ?? "");
-          const matchedCustomerId = normalizedPhone ? customersByNormalizedPhone.get(normalizedPhone) ?? null : null;
+          const phoneMatchId = normalizedPhone
+            ? customersByNormalizedPhone.get(normalizedPhone) ?? null
+            : null;
+          // Sem telefone (ou sem match por telefone): tenta dar match pelo nome.
+          const nameKey = normalizeProductName(result.customer.displayName ?? "");
+          const nameMatchId = nameKey ? customersByNormalizedName.get(nameKey) ?? null : null;
+          const matchedCustomerId = phoneMatchId ?? nameMatchId;
 
           const mergedResult = {
             ...result,
@@ -497,7 +527,7 @@ const ImportOrdersPage: React.FC = () => {
 
       void run();
     }
-  }, [activeWeeklyProducts, customersByNormalizedPhone, updateLocalRecord]);
+  }, [activeWeeklyProducts, customersByNormalizedPhone, customersByNormalizedName, updateLocalRecord]);
 
   const enqueueAnalysis = useCallback((id: string, weekIdForEntry: string, imageDataUrl: string) => {
     queueRef.current.push({ id, weekId: weekIdForEntry, imageDataUrl });
@@ -841,7 +871,8 @@ const ImportOrdersPage: React.FC = () => {
     });
 
     setNewCustomerName(selectedRecord.analysisResult?.customer.displayName ?? "");
-    setNewCustomerAddress("");
+    setNewCustomerAddress(selectedRecord.analysisResult?.customer.addressRaw ?? "");
+    setNewCustomerNif(selectedRecord.analysisResult?.customer.nifRaw ?? "");
   }, [selectedRecord]);
 
   const selectedDraft = selectedRecord ? draftById[selectedRecord.id] ?? buildDraftFromRecord(selectedRecord) : undefined;
@@ -854,6 +885,8 @@ const ImportOrdersPage: React.FC = () => {
           customerId: null,
           phoneDetected: null,
           displayNameDetected: null,
+          addressDetected: null,
+          nifDetected: null,
           items: [],
           notes: "",
         }),
@@ -883,20 +916,28 @@ const ImportOrdersPage: React.FC = () => {
       return;
     }
 
+    setCreatingCustomer(true);
     try {
-      const created = await apiCreateCustomer({
+      const created = await createCustomer({
         name: newCustomerName.trim(),
         address: newCustomerAddress.trim(),
+        nif: newCustomerNif.trim() || undefined,
         phone: phone ?? undefined,
         notes: "Criado na validacao de importacao IA.",
       });
 
-      updateDraft(selectedRecord.id, { customerId: created.id, phoneDetected: created.phone ?? selectedDraft.phoneDetected });
+      // Associa automaticamente o cliente criado a este print/encomenda.
+      updateDraft(selectedRecord.id, {
+        customerId: created.id,
+        phoneDetected: created.phone ?? selectedDraft.phoneDetected,
+      });
       await persistDraft(selectedRecord.id);
-      toast.success("Cliente criado e associado ao rascunho.");
+      toast.success("Cliente criado e associado a esta encomenda.");
     } catch (err) {
       console.error(err);
       toast.error("Nao foi possivel criar cliente.");
+    } finally {
+      setCreatingCustomer(false);
     }
   };
 
@@ -908,9 +949,50 @@ const ImportOrdersPage: React.FC = () => {
       return;
     }
 
+    // Valida linhas de "produto novo" antes de gravar.
+    const invalidNew = selectedDraft.items.find(
+      (item) =>
+        item.productId === NEW_PRODUCT_ID &&
+        (!(item.newProductName ?? "").trim() || !(Number(item.newProductPrice) > 0)),
+    );
+    if (invalidNew) {
+      toast.error("Preenche nome e preco (maior que 0) dos produtos novos.");
+      return;
+    }
+
+    setSavingValidation(true);
+
+    // Cria primeiro os produtos novos (fora do catalogo) e guarda o mapa por linha.
+    const createdProductByLine = new Map<number, { id: string; price: number }>();
+    try {
+      for (let i = 0; i < selectedDraft.items.length; i += 1) {
+        const item = selectedDraft.items[i];
+        if (item.productId !== NEW_PRODUCT_ID) continue;
+        const rawUnit = (item.unit ?? "").trim();
+        const unit = (NEW_PRODUCT_UNITS as readonly string[]).includes(rawUnit)
+          ? (rawUnit as (typeof NEW_PRODUCT_UNITS)[number])
+          : "un";
+        const price = Number(item.newProductPrice) || 0;
+        const created = await createProduct({
+          name: (item.newProductName ?? "").trim(),
+          unit,
+          price,
+        });
+        createdProductByLine.set(i, { id: created.id, price: created.price });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Nao foi possivel criar o produto novo.");
+      setSavingValidation(false);
+      return;
+    }
+
     const orderItems: Order["items"] = [];
-    selectedDraft.items.forEach((item) => {
-      const product = productsById.get(item.productId);
+    selectedDraft.items.forEach((item, index) => {
+      const created = createdProductByLine.get(index);
+      const product = created
+        ? { id: created.id, price: created.price, unit: item.unit }
+        : productsById.get(item.productId);
       if (!product) return;
 
       const quantity = Number(item.quantity) || 0;
@@ -919,7 +1001,7 @@ const ImportOrdersPage: React.FC = () => {
       const validatedUnit = (item.unit ?? "").trim();
 
       orderItems.push({
-        productId: item.productId,
+        productId: product.id,
         quantity,
         unit: (validatedUnit || product.unit) as Order["items"][number]["unit"],
         unitPrice: product.price,
@@ -928,13 +1010,13 @@ const ImportOrdersPage: React.FC = () => {
 
     if (!orderItems.length) {
       toast.error("Sem linhas validas para criar encomenda.");
+      setSavingValidation(false);
       return;
     }
 
     const nextRecordId =
       selectedValidationIndex >= 0 ? reviewRows[selectedValidationIndex + 1]?.id ?? null : null;
 
-    setSavingValidation(true);
     try {
       await createOrder({
         customerId: selectedDraft.customerId,
@@ -1463,91 +1545,167 @@ const ImportOrdersPage: React.FC = () => {
                 <div className="import-lines-title">Linhas da encomenda</div>
                 <div className="import-lines-editor">
                   {selectedDraft.items.map((line, index) => (
-                    <div key={`${selectedRecord.id}-${index}`} className="import-line-row">
-                      <select
-                        value={line.productId}
-                        onChange={(e) => {
-                          const next = [...selectedDraft.items];
-                          next[index] = { ...line, productId: e.target.value };
-                          updateDraft(selectedRecord.id, { items: next });
-                        }}
-                        onBlur={() => void persistDraft(selectedRecord.id)}
-                      >
-                        <option value="">Produto...</option>
-                        {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-                      </select>
+                    <div key={`${selectedRecord.id}-${index}`} className="import-line-wrap">
+                      <div className="import-line-row">
+                        <select
+                          value={line.productId}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            const next = [...selectedDraft.items];
+                            if (value === NEW_PRODUCT_ID) {
+                              next[index] = {
+                                ...line,
+                                productId: NEW_PRODUCT_ID,
+                                unit: (NEW_PRODUCT_UNITS as readonly string[]).includes(line.unit)
+                                  ? line.unit
+                                  : "un",
+                                newProductName: line.newProductName ?? line.productNameRaw ?? "",
+                                newProductPrice: line.newProductPrice ?? 0,
+                              };
+                            } else {
+                              next[index] = { ...line, productId: value };
+                            }
+                            updateDraft(selectedRecord.id, { items: next });
+                          }}
+                          onBlur={() => void persistDraft(selectedRecord.id)}
+                        >
+                          <option value="">Produto...</option>
+                          <option value={NEW_PRODUCT_ID}>➕ Novo produto (fora do catalogo)</option>
+                          {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                        </select>
 
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={line.quantity}
-                        onChange={(e) => {
-                          const next = [...selectedDraft.items];
-                          next[index] = { ...line, quantity: Number(e.target.value) || 0 };
-                          updateDraft(selectedRecord.id, { items: next });
-                        }}
-                        onBlur={() => void persistDraft(selectedRecord.id)}
-                      />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={line.quantity}
+                          onChange={(e) => {
+                            const next = [...selectedDraft.items];
+                            next[index] = { ...line, quantity: Number(e.target.value) || 0 };
+                            updateDraft(selectedRecord.id, { items: next });
+                          }}
+                          onBlur={() => void persistDraft(selectedRecord.id)}
+                        />
 
-                      <select
-                        value={line.unit}
-                        onChange={(e) => {
-                          const next = [...selectedDraft.items];
-                          next[index] = { ...line, unit: e.target.value || "kg" };
-                          updateDraft(selectedRecord.id, { items: next });
-                        }}
-                        onBlur={() => void persistDraft(selectedRecord.id)}
-                      >
-                        {UNIT_OPTIONS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
-                      </select>
+                        <select
+                          value={line.unit}
+                          onChange={(e) => {
+                            const next = [...selectedDraft.items];
+                            next[index] = { ...line, unit: e.target.value || "kg" };
+                            updateDraft(selectedRecord.id, { items: next });
+                          }}
+                          onBlur={() => void persistDraft(selectedRecord.id)}
+                        >
+                          {(line.productId === NEW_PRODUCT_ID ? NEW_PRODUCT_UNITS : UNIT_OPTIONS).map((unit) => (
+                            <option key={unit} value={unit}>{unit}</option>
+                          ))}
+                        </select>
 
-                      <span className={confidenceClass(line.confidence)}>{Math.round(line.confidence * 100)}%</span>
+                        <span className={confidenceClass(line.confidence)}>{Math.round(line.confidence * 100)}%</span>
 
-                      <button
-                        type="button"
-                        className="btn-danger"
-                        onClick={() => {
-                          const next = selectedDraft.items.filter((_, idx) => idx !== index);
-                          updateDraft(selectedRecord.id, { items: next });
-                          void persistDraft(selectedRecord.id);
-                        }}
-                      >
-                        Remover
-                      </button>
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          onClick={() => {
+                            const next = selectedDraft.items.filter((_, idx) => idx !== index);
+                            updateDraft(selectedRecord.id, { items: next });
+                            void persistDraft(selectedRecord.id);
+                          }}
+                        >
+                          Remover
+                        </button>
+                      </div>
+
+                      {line.productId === NEW_PRODUCT_ID && (
+                        <div className="import-new-product-fields">
+                          <input
+                            type="text"
+                            placeholder="Nome do produto novo"
+                            value={line.newProductName ?? ""}
+                            onChange={(e) => {
+                              const next = [...selectedDraft.items];
+                              next[index] = { ...line, newProductName: e.target.value };
+                              updateDraft(selectedRecord.id, { items: next });
+                            }}
+                            onBlur={() => void persistDraft(selectedRecord.id)}
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Preco (€)"
+                            value={line.newProductPrice ?? ""}
+                            onChange={(e) => {
+                              const next = [...selectedDraft.items];
+                              next[index] = { ...line, newProductPrice: Number(e.target.value) || 0 };
+                              updateDraft(selectedRecord.id, { items: next });
+                            }}
+                            onBlur={() => void persistDraft(selectedRecord.id)}
+                          />
+                          <span className="import-new-product-hint">Sera criado no catalogo ao confirmar.</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
 
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    const first = products[0];
-                    if (!first) return;
-                    const next = [
-                      ...selectedDraft.items,
-                      {
-                        productId: first.id,
-                        quantity: 1,
-                        unit: first.unit,
-                        productNameRaw: first.name,
-                        confidence: 0.7,
-                        notes: "Linha adicionada manualmente",
-                      },
-                    ];
-                    updateDraft(selectedRecord.id, { items: next });
-                    void persistDraft(selectedRecord.id);
-                  }}
-                >
-                  Adicionar linha
-                </button>
+                <div className="import-line-add-buttons">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      const first = products[0];
+                      if (!first) return;
+                      const next = [
+                        ...selectedDraft.items,
+                        {
+                          productId: first.id,
+                          quantity: 1,
+                          unit: first.unit,
+                          productNameRaw: first.name,
+                          confidence: 0.7,
+                          notes: "Linha adicionada manualmente",
+                        },
+                      ];
+                      updateDraft(selectedRecord.id, { items: next });
+                      void persistDraft(selectedRecord.id);
+                    }}
+                  >
+                    Adicionar linha
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      const next = [
+                        ...selectedDraft.items,
+                        {
+                          productId: NEW_PRODUCT_ID,
+                          quantity: 1,
+                          unit: "un",
+                          productNameRaw: "",
+                          confidence: 1,
+                          notes: "Produto novo (fora do catalogo)",
+                          newProductName: "",
+                          newProductPrice: 0,
+                        },
+                      ];
+                      updateDraft(selectedRecord.id, { items: next });
+                      void persistDraft(selectedRecord.id);
+                    }}
+                  >
+                    ➕ Adicionar produto novo
+                  </button>
+                </div>
 
                 <div className="import-new-customer-box">
                   <h3>Novo cliente (se necessario)</h3>
                   <div className="field"><label>Nome</label><input value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} /></div>
                   <div className="field"><label>Morada</label><input value={newCustomerAddress} onChange={(e) => setNewCustomerAddress(e.target.value)} /></div>
-                  <button type="button" className="btn-secondary" onClick={createCustomerFromValidation}>Criar cliente</button>
+                  <div className="field"><label>NIF</label><input value={newCustomerNif} onChange={(e) => setNewCustomerNif(e.target.value)} placeholder="Opcional" /></div>
+                  <button type="button" className="btn-secondary" onClick={createCustomerFromValidation} disabled={creatingCustomer}>
+                    {creatingCustomer ? "A criar..." : "Criar cliente e associar"}
+                  </button>
                 </div>
 
                 {selectedRecord.warnings.length > 0 && (

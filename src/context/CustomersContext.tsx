@@ -11,7 +11,7 @@ import toast from "react-hot-toast";
 interface CustomersContextValue {
   customers: Customer[];
   loadingCustomers: boolean;
-  createCustomer: (data: Omit<Customer, "id">) => Promise<void>;
+  createCustomer: (data: Omit<Customer, "id">) => Promise<Customer>;
   updateCustomer: (id: string, data: Omit<Customer, "id">) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
 }
@@ -40,10 +40,11 @@ export const CustomersProvider: React.FC<{ children: ReactNode }> = ({ children 
     })();
   }, []);
 
-  const handleCreateCustomer = async (data: Omit<Customer, "id">) => {
+  const handleCreateCustomer = async (data: Omit<Customer, "id">): Promise<Customer> => {
     const created = await apiCreateCustomer(data);
     setCustomers((prev) => sortByName([created, ...prev]));
     toast.success(`Cliente "${data.name}" criado.`);
+    return created;
   };
 
   const handleUpdateCustomer = async (id: string, data: Omit<Customer, "id">) => {

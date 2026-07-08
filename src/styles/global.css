@@ -3076,6 +3076,46 @@ input[type="checkbox"] {
   align-items: center;
 }
 
+.import-line-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.import-new-product-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  margin-left: 0.2rem;
+  background: var(--accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.import-new-product-fields input[type="text"] {
+  flex: 1 1 180px;
+  min-width: 140px;
+}
+
+.import-new-product-fields input[type="number"] {
+  flex: 0 0 110px;
+  width: 110px;
+}
+
+.import-new-product-hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  flex-basis: 100%;
+}
+
+.import-line-add-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .import-warning-list {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
