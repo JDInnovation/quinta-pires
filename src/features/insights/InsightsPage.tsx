@@ -14,8 +14,8 @@ import {
 import { useCustomers } from "../../context/CustomersContext";
 import { useProducts } from "../../context/ProductsContext";
 import { useOrders } from "../../context/OrdersContext";
-import { listAiLearningEntries } from "../import/api";
-import type { AiLearningEntry } from "../import/types";
+import { listAiLearningEntries, listProductAliases, listCustomerAliases, listCustomerPreferences, listProductUnitPrefs, listAiCorrections } from "../import/api";
+import type { AiLearningEntry, ProductAlias, CustomerAlias, CustomerPreference, ProductUnitPref, AiCorrection } from "../import/types";
 import type { Order, Product } from "../../types";
 
 const formatCurrency = (value: number) =>
@@ -114,6 +114,11 @@ const InsightsPage: React.FC = () => {
   const [windowWeeks, setWindowWeeks] = useState<WindowOption>(8);
   const [forecastExpanded, setForecastExpanded] = useState(false);
   const [learning, setLearning] = useState<AiLearningEntry[]>([]);
+  const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
+  const [customerAliases, setCustomerAliases] = useState<CustomerAlias[]>([]);
+  const [customerPreferences, setCustomerPreferences] = useState<CustomerPreference[]>([]);
+  const [productUnitPrefs, setProductUnitPrefs] = useState<ProductUnitPref[]>([]);
+  const [aiCorrections, setAiCorrections] = useState<AiCorrection[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -122,6 +127,22 @@ const InsightsPage: React.FC = () => {
         if (alive) setLearning(rows);
       })
       .catch((err) => console.warn("Falha ao carregar aprendizagem da IA", err));
+    Promise.all([
+      listProductAliases(),
+      listCustomerAliases(),
+      listCustomerPreferences(),
+      listProductUnitPrefs(),
+      listAiCorrections(),
+    ])
+      .then(([pAliases, cAliases, cPrefs, uPrefs, corrections]) => {
+        if (!alive) return;
+        setProductAliases(pAliases);
+        setCustomerAliases(cAliases);
+        setCustomerPreferences(cPrefs);
+        setProductUnitPrefs(uPrefs);
+        setAiCorrections(corrections);
+      })
+      .catch((err) => console.warn("Falha ao carregar memoria da IA", err));
     return () => {
       alive = false;
     };
@@ -372,6 +393,88 @@ const InsightsPage: React.FC = () => {
 
     return { total, avgConfidence, avgAccuracy, autoMatchRate, keepRate, trend, improving };
   }, [learning]);
+
+  // --- Memoria da IA: o que aprendeu com as validacoes ---
+  const aiMemory = useMemo(() => {
+    const topProductAliases = productAliases.slice(0, 12).map((a) => ({
+      id: a.id,
+      alias: a.displayText || a.aliasText,
+      target: productsById.get(a.productId)?.name ?? a.productName,
+      count: a.count,
+    }));
+
+    const topCustomerAliases = customerAliases.slice(0, 12).map((a) => ({
+      id: a.id,
+      alias: a.displayText || a.aliasText,
+      target: customersById.get(a.customerId)?.name ?? a.customerName,
+      count: a.count,
+    }));
+
+    const topPreferences = customerPreferences
+      .filter((p) => p.text)
+      .slice(0, 12)
+      .map((p) => ({
+        id: p.id,
+        text: p.text,
+        target: customersById.get(p.customerId)?.name ?? p.customerName,
+        count: p.count,
+      }));
+
+    const unitPrefs = productUnitPrefs
+      .map((pref) => {
+        let bestUnit = "";
+        let bestCount = 0;
+        let totalCount = 0;
+        Object.entries(pref.unitCounts ?? {}).forEach(([unit, count]) => {
+          totalCount += count;
+          if (count > bestCount) {
+            bestUnit = unit;
+            bestCount = count;
+          }
+        });
+        return {
+          id: pref.id,
+          product: productsById.get(pref.productId)?.name ?? pref.productName,
+          unit: bestUnit,
+          count: bestCount,
+          total: totalCount,
+        };
+      })
+      .filter((u) => u.unit)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+
+    const corrections = aiCorrections.slice(0, 12).map((c) => ({
+      id: c.id,
+      alias: c.displayText || c.aliasText,
+      from: productsById.get(c.fromProductId)?.name ?? c.fromProductName,
+      to: productsById.get(c.toProductId)?.name ?? c.toProductName,
+      count: c.count,
+    }));
+
+    const total =
+      topProductAliases.length +
+      topCustomerAliases.length +
+      topPreferences.length +
+      unitPrefs.length +
+      corrections.length;
+
+    return {
+      topProductAliases,
+      topCustomerAliases,
+      topPreferences,
+      unitPrefs,
+      corrections,
+      counts: {
+        productAliases: productAliases.length,
+        customerAliases: customerAliases.length,
+        preferences: customerPreferences.length,
+        unitPrefs: productUnitPrefs.length,
+        corrections: aiCorrections.length,
+      },
+      hasAny: total > 0,
+    };
+  }, [productAliases, customerAliases, customerPreferences, productUnitPrefs, aiCorrections, productsById, customersById]);
 
   const confidenceClass = (c: ForecastRow["confidence"]) =>
     c === "alta" ? "confidence-good" : c === "media" ? "confidence-mid" : "confidence-low";
@@ -638,6 +741,126 @@ const InsightsPage: React.FC = () => {
                   </div>
                 )}
               </>
+            )}
+          </section>
+
+          {/* O que a IA aprendeu (memoria) */}
+          <section className="card insights-section">
+            <div className="insights-section-head">
+              <h2 className="card-title">O que a IA aprendeu</h2>
+              <p className="muted-hint">
+                Memória construída a partir das tuas validações. A IA usa isto para acertar sozinha nas próximas importações.
+              </p>
+            </div>
+
+            {!aiMemory.hasAny ? (
+              <p className="muted-hint">
+                Ainda sem memória. Cada print que validas na página <strong>Importar</strong> ensina a IA e aparece aqui.
+              </p>
+            ) : (
+              <div className="ai-memory-grid">
+                {aiMemory.topProductAliases.length > 0 && (
+                  <article className="ai-memory-card">
+                    <header className="ai-memory-card-head">
+                      <h3>Nomes de produto</h3>
+                      <span className="ai-memory-badge">{aiMemory.counts.productAliases}</span>
+                    </header>
+                    <p className="muted-hint">Como os clientes escrevem cada produto.</p>
+                    <ul className="ai-memory-list">
+                      {aiMemory.topProductAliases.map((a) => (
+                        <li key={a.id} className="ai-memory-item">
+                          <span className="ai-memory-from">“{a.alias}”</span>
+                          <span className="ai-memory-arrow">→</span>
+                          <span className="ai-memory-to">{a.target}</span>
+                          <span className="ai-memory-count">×{a.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                )}
+
+                {aiMemory.topCustomerAliases.length > 0 && (
+                  <article className="ai-memory-card">
+                    <header className="ai-memory-card-head">
+                      <h3>Nomes de cliente</h3>
+                      <span className="ai-memory-badge">{aiMemory.counts.customerAliases}</span>
+                    </header>
+                    <p className="muted-hint">Apelidos/nomes de contacto associados a clientes.</p>
+                    <ul className="ai-memory-list">
+                      {aiMemory.topCustomerAliases.map((a) => (
+                        <li key={a.id} className="ai-memory-item">
+                          <span className="ai-memory-from">“{a.alias}”</span>
+                          <span className="ai-memory-arrow">→</span>
+                          <span className="ai-memory-to">{a.target}</span>
+                          <span className="ai-memory-count">×{a.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                )}
+
+                {aiMemory.topPreferences.length > 0 && (
+                  <article className="ai-memory-card">
+                    <header className="ai-memory-card-head">
+                      <h3>Preferências de cliente</h3>
+                      <span className="ai-memory-badge">{aiMemory.counts.preferences}</span>
+                    </header>
+                    <p className="muted-hint">Instruções recorrentes preenchidas automaticamente.</p>
+                    <ul className="ai-memory-list">
+                      {aiMemory.topPreferences.map((p) => (
+                        <li key={p.id} className="ai-memory-item">
+                          <span className="ai-memory-to">{p.target}</span>
+                          <span className="ai-memory-arrow">·</span>
+                          <span className="ai-memory-from">{p.text}</span>
+                          <span className="ai-memory-count">×{p.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                )}
+
+                {aiMemory.unitPrefs.length > 0 && (
+                  <article className="ai-memory-card">
+                    <header className="ai-memory-card-head">
+                      <h3>Unidades preferidas</h3>
+                      <span className="ai-memory-badge">{aiMemory.counts.unitPrefs}</span>
+                    </header>
+                    <p className="muted-hint">Unidade mais usada por produto (aplicada por defeito).</p>
+                    <ul className="ai-memory-list">
+                      {aiMemory.unitPrefs.map((u) => (
+                        <li key={u.id} className="ai-memory-item">
+                          <span className="ai-memory-to">{u.product}</span>
+                          <span className="ai-memory-arrow">→</span>
+                          <span className="ai-memory-unit">{u.unit}</span>
+                          <span className="ai-memory-count">{u.count}/{u.total}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                )}
+
+                {aiMemory.corrections.length > 0 && (
+                  <article className="ai-memory-card ai-memory-card--wide">
+                    <header className="ai-memory-card-head">
+                      <h3>Correções</h3>
+                      <span className="ai-memory-badge">{aiMemory.counts.corrections}</span>
+                    </header>
+                    <p className="muted-hint">Onde corrigiste a IA — ela deixa de repetir o erro.</p>
+                    <ul className="ai-memory-list">
+                      {aiMemory.corrections.map((c) => (
+                        <li key={c.id} className="ai-memory-item ai-memory-item--correction">
+                          <span className="ai-memory-from">“{c.alias}”</span>
+                          <span className="ai-memory-arrow">✗</span>
+                          <span className="ai-memory-wrong">{c.from}</span>
+                          <span className="ai-memory-arrow">✓</span>
+                          <span className="ai-memory-to">{c.to}</span>
+                          <span className="ai-memory-count">×{c.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                )}
+              </div>
             )}
           </section>
 

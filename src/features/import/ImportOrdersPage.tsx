@@ -14,6 +14,14 @@ import {
   patchOrderImport,
   logAiLearningEntry,
   upsertProductAlias,
+  listCustomerAliases,
+  upsertCustomerAlias,
+  listCustomerPreferences,
+  upsertCustomerPreference,
+  listProductUnitPrefs,
+  bumpProductUnitPref,
+  listAiCorrections,
+  upsertAiCorrection,
 } from "./api";
 import { createAiOrderImportService } from "../../services/aiOrderImportService";
 import { optimizeImageForAi } from "../../services/imageOptimization";
@@ -25,6 +33,10 @@ import type {
   ImportStatus,
   OrderImportRecord,
   ProductAlias,
+  CustomerAlias,
+  CustomerPreference,
+  ProductUnitPref,
+  AiCorrection,
   WeeklyCatalog,
   WeeklyCatalogProduct,
 } from "./types";
@@ -273,6 +285,10 @@ const ImportOrdersPage: React.FC = () => {
   const [importingCatalog, setImportingCatalog] = useState(false);
 
   const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
+  const [customerAliases, setCustomerAliases] = useState<CustomerAlias[]>([]);
+  const [customerPreferences, setCustomerPreferences] = useState<CustomerPreference[]>([]);
+  const [productUnitPrefs, setProductUnitPrefs] = useState<ProductUnitPref[]>([]);
+  const [aiCorrections, setAiCorrections] = useState<AiCorrection[]>([]);
 
   const [selectedValidationId, setSelectedValidationId] = useState<string | null>(null);
   const [validationModalOpen, setValidationModalOpen] = useState(false);
@@ -347,6 +363,62 @@ const ImportOrdersPage: React.FC = () => {
     return map;
   }, [customers]);
 
+  // Aliases de cliente aprendidos (nome/apelido do print -> customerId).
+  const customerAliasByName = useMemo(() => {
+    const map = new Map<string, string>();
+    // customerAliases ja vem ordenado por count desc.
+    customerAliases.forEach((a) => {
+      const key = normalizeProductName(a.aliasText || a.displayText || "");
+      if (!key || !a.customerId) return;
+      if (!map.has(key)) map.set(key, a.customerId);
+    });
+    return map;
+  }, [customerAliases]);
+
+  // Preferencias/instrucoes recorrentes por cliente (mais frequentes primeiro).
+  const preferencesByCustomerId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    customerPreferences.forEach((p) => {
+      if (!p.customerId || !p.text) return;
+      const list = map.get(p.customerId) ?? [];
+      // So consideramos preferencias reforcadas (vistas >= 2 vezes) para auto-preencher.
+      if (p.count >= 2 && list.length < 6 && !list.includes(p.text)) list.push(p.text);
+      map.set(p.customerId, list);
+    });
+    return map;
+  }, [customerPreferences]);
+
+  // Unidade preferida por produto (a mais confirmada).
+  const preferredUnitByProductId = useMemo(() => {
+    const map = new Map<string, string>();
+    productUnitPrefs.forEach((pref) => {
+      let bestUnit = "";
+      let bestCount = 0;
+      Object.entries(pref.unitCounts ?? {}).forEach(([unit, count]) => {
+        if (count > bestCount) {
+          bestUnit = unit;
+          bestCount = count;
+        }
+      });
+      // So aplicamos quando ha um sinal claro (>= 2 confirmacoes).
+      if (bestUnit && bestCount >= 2) map.set(pref.productId, bestUnit);
+    });
+    return map;
+  }, [productUnitPrefs]);
+
+  // Correcoes para enviar a IA (rawText -> evitar produto A, usar produto B).
+  const correctionsForAi = useMemo(
+    () =>
+      aiCorrections
+        .filter((c) => c.aliasText && c.toProductName)
+        .map((c) => ({
+          rawText: c.displayText || c.aliasText,
+          avoidProductName: c.fromProductName,
+          useProductName: c.toProductName,
+        })),
+    [aiCorrections],
+  );
+
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
   const reviewRows = useMemo(
@@ -404,11 +476,24 @@ const ImportOrdersPage: React.FC = () => {
     setProductAliases(rows);
   }, []);
 
+  const refreshLearning = useCallback(async () => {
+    const [custAliases, custPrefs, unitPrefs, corrections] = await Promise.all([
+      listCustomerAliases(),
+      listCustomerPreferences(),
+      listProductUnitPrefs(),
+      listAiCorrections(),
+    ]);
+    setCustomerAliases(custAliases);
+    setCustomerPreferences(custPrefs);
+    setProductUnitPrefs(unitPrefs);
+    setAiCorrections(corrections);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        await Promise.all([refreshCatalogs(), refreshImports(), refreshAliases()]);
+        await Promise.all([refreshCatalogs(), refreshImports(), refreshAliases(), refreshLearning()]);
       } catch (err) {
         console.error(err);
         toast.error("Nao foi possivel carregar dados da importacao.");
@@ -416,7 +501,7 @@ const ImportOrdersPage: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [refreshCatalogs, refreshImports, refreshAliases]);
+  }, [refreshCatalogs, refreshImports, refreshAliases, refreshLearning]);
 
   const updateLocalRecord = useCallback((id: string, patch: Partial<OrderImportRecord>) => {
     setImports((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -469,6 +554,7 @@ const ImportOrdersPage: React.FC = () => {
               canonical: p.name,
               aliases: p.aliases ?? [],
             })),
+            corrections: correctionsForAi,
             language: "pt-PT",
           });
 
@@ -479,7 +565,9 @@ const ImportOrdersPage: React.FC = () => {
           // Sem telefone (ou sem match por telefone): tenta dar match pelo nome.
           const nameKey = normalizeProductName(result.customer.displayName ?? "");
           const nameMatchId = nameKey ? customersByNormalizedName.get(nameKey) ?? null : null;
-          const matchedCustomerId = phoneMatchId ?? nameMatchId;
+          // Match por alias de cliente aprendido (nome/apelido usado em prints anteriores).
+          const aliasMatchId = nameKey ? customerAliasByName.get(nameKey) ?? null : null;
+          const matchedCustomerId = phoneMatchId ?? nameMatchId ?? aliasMatchId;
 
           const mergedResult = {
             ...result,
@@ -501,13 +589,36 @@ const ImportOrdersPage: React.FC = () => {
 
           const nextStatus: ImportStatus = needsReview ? "PENDING_VALIDATION" : "DRAFT_AI";
 
+          // Aplica aprendizagem ao rascunho: unidade preferida por produto e
+          // preferencias/instrucoes recorrentes do cliente.
+          const baseDraft = buildDraftFromRecord({ analysisResult: mergedResult } as OrderImportRecord);
+          const learnedNotes = matchedCustomerId
+            ? preferencesByCustomerId.get(matchedCustomerId) ?? []
+            : [];
+          const existingNotes = baseDraft.notes ?? "";
+          const notesToAdd = learnedNotes.filter(
+            (n) => !existingNotes.toLowerCase().includes(n.toLowerCase()),
+          );
+          const draftWithLearning: CorrectedOrderDraft = {
+            ...baseDraft,
+            items: baseDraft.items.map((item) => {
+              const preferred = item.productId
+                ? preferredUnitByProductId.get(item.productId)
+                : undefined;
+              return preferred && preferred !== item.unit
+                ? { ...item, unit: preferred }
+                : item;
+            }),
+            notes: [existingNotes, ...notesToAdd].filter(Boolean).join(" | "),
+          };
+
           const patch: Partial<OrderImportRecord> = {
             status: nextStatus,
             analysisResult: mergedResult,
             warnings: mergedResult.warnings,
             overallConfidence: mergedResult.order.overallConfidence,
             requiresValidation: needsReview,
-            correctedDraft: buildDraftFromRecord({ analysisResult: mergedResult } as OrderImportRecord),
+            correctedDraft: draftWithLearning,
             aiProvider: aiMode === "worker" ? "cloudflare-worker" : "mock-provider",
             aiModel: aiMode === "worker" ? "openai-responses" : "mock-image-v1",
             aiMode: aiMode === "worker" ? "worker" : "mock",
@@ -527,7 +638,7 @@ const ImportOrdersPage: React.FC = () => {
 
       void run();
     }
-  }, [activeWeeklyProducts, customersByNormalizedPhone, customersByNormalizedName, updateLocalRecord]);
+  }, [activeWeeklyProducts, customersByNormalizedPhone, customersByNormalizedName, customerAliasByName, preferencesByCustomerId, preferredUnitByProductId, correctionsForAi, updateLocalRecord]);
 
   const enqueueAnalysis = useCallback((id: string, weekIdForEntry: string, imageDataUrl: string) => {
     queueRef.current.push({ id, weekId: weekIdForEntry, imageDataUrl });
@@ -1116,6 +1227,102 @@ const ImportOrdersPage: React.FC = () => {
         }
       } catch (aliasErr) {
         console.warn("Falha ao guardar aliases da IA", aliasErr);
+      }
+
+      // Aprendizagem adicional: aliases de cliente, preferencias, unidades e correcoes.
+      try {
+        const learningWrites: Array<Promise<void>> = [];
+        const finalCustomerId = selectedDraft.customerId;
+        const finalCustomer = customers.find((c) => c.id === finalCustomerId) ?? null;
+        const analysis = selectedRecord.analysisResult;
+
+        // 1) Alias de cliente: nome/apelido detetado no print -> cliente confirmado.
+        const detectedName = (analysis?.customer.displayName ?? "").trim();
+        if (detectedName && finalCustomerId && finalCustomer) {
+          const nameKey = normalizeProductName(detectedName);
+          const canonicalName = normalizeProductName(finalCustomer.name ?? "");
+          if (nameKey && nameKey !== canonicalName) {
+            learningWrites.push(
+              upsertCustomerAlias({
+                aliasText: detectedName,
+                displayText: detectedName,
+                customerId: finalCustomerId,
+                customerName: finalCustomer.name ?? "",
+              }),
+            );
+          }
+        }
+
+        // 2) Preferencias do cliente: instrucoes recorrentes (generalNotes).
+        if (finalCustomerId && finalCustomer) {
+          (analysis?.order.generalNotes ?? []).forEach((note) => {
+            const text = (note ?? "").trim();
+            if (!text) return;
+            learningWrites.push(
+              upsertCustomerPreference({
+                customerId: finalCustomerId,
+                customerName: finalCustomer.name ?? "",
+                text,
+              }),
+            );
+          });
+        }
+
+        // 3) Unidade preferida por produto (a partir das linhas confirmadas).
+        orderItems.forEach((item) => {
+          const product = productsById.get(item.productId);
+          const unit = (item.unit ?? "").trim();
+          if (!product || !unit) return;
+          learningWrites.push(
+            bumpProductUnitPref({
+              productId: product.id,
+              productName: product.name,
+              unit,
+            }),
+          );
+        });
+
+        // 4) Correcoes (aprendizagem negativa): a IA mapeou A, tu mudaste para B.
+        const originalDraft = buildDraftFromRecord(selectedRecord);
+        const keyOfRaw = (raw: string) => (raw || "").trim().toLowerCase();
+        const finalByRaw = new Map(selectedDraft.items.map((it) => [keyOfRaw(it.productNameRaw), it]));
+        originalDraft.items.forEach((orig) => {
+          const match = finalByRaw.get(keyOfRaw(orig.productNameRaw));
+          if (!match) return;
+          const fromId = orig.productId;
+          const toId = match.productId;
+          if (
+            !fromId ||
+            !toId ||
+            fromId === toId ||
+            fromId === NEW_PRODUCT_ID ||
+            toId === NEW_PRODUCT_ID
+          ) {
+            return;
+          }
+          const fromProduct = productsById.get(fromId);
+          const toProduct = productsById.get(toId);
+          if (!fromProduct || !toProduct) return;
+          const raw = (orig.productNameRaw || "").trim();
+          if (!raw) return;
+          learningWrites.push(
+            upsertAiCorrection({
+              aliasText: normalizeProductName(raw),
+              displayText: raw,
+              fromProductId: fromProduct.id,
+              fromProductName: fromProduct.name,
+              toProductId: toProduct.id,
+              toProductName: toProduct.name,
+            }),
+          );
+        });
+
+        if (learningWrites.length) {
+          await Promise.all(learningWrites);
+          void refreshLearning();
+        }
+      } catch (learnErr) {
+        console.warn("Falha ao guardar aprendizagem adicional da IA", learnErr);
       }
 
       await deleteOrderImportRecord(selectedRecord);

@@ -24,12 +24,28 @@ import type {
   CreateAiLearningEntryInput,
   ProductAlias,
   UpsertProductAliasInput,
+  CustomerAlias,
+  UpsertCustomerAliasInput,
+  CustomerPreference,
+  UpsertCustomerPreferenceInput,
+  ProductUnitPref,
+  BumpProductUnitPrefInput,
+  AiCorrection,
+  UpsertAiCorrectionInput,
 } from "./types";
 
 const orderImportsCol = collection(db, "orderImports");
 const weeklyCatalogsCol = collection(db, "weeklyCatalogs");
 const aiLearningCol = collection(db, "aiLearningLog");
 const productAliasesCol = collection(db, "productAliases");
+const customerAliasesCol = collection(db, "customerAliases");
+const customerPreferencesCol = collection(db, "customerPreferences");
+const productUnitPrefsCol = collection(db, "productUnitPrefs");
+const aiCorrectionsCol = collection(db, "aiCorrections");
+
+function safeDocId(text: string): string {
+  return text.replace(/\s+/g, "-").replace(/[/#?[\]]/g, "_").slice(0, 140);
+}
 
 function toOrderImportRecord(id: string, raw: Record<string, unknown>): OrderImportRecord {
   return {
@@ -220,6 +236,161 @@ export async function upsertProductAlias(
       displayText: input.displayText,
       productId: input.productId,
       productName: input.productName,
+      count: increment(1),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+// --- Aliases de cliente (nome/apelido do print -> cliente) ---
+export async function listCustomerAliases(): Promise<CustomerAlias[]> {
+  const snap = await getDocs(customerAliasesCol);
+  const rows = snap.docs.map((d) => {
+    const raw = d.data() as Record<string, unknown>;
+    return {
+      id: d.id,
+      aliasText: String(raw.aliasText ?? ""),
+      displayText: String(raw.displayText ?? ""),
+      customerId: String(raw.customerId ?? ""),
+      customerName: String(raw.customerName ?? ""),
+      count: Number(raw.count ?? 0),
+      updatedAt: raw.updatedAt,
+    } satisfies CustomerAlias;
+  });
+  return rows.sort((a, b) => b.count - a.count);
+}
+
+export async function upsertCustomerAlias(
+  input: UpsertCustomerAliasInput,
+): Promise<void> {
+  const id = safeDocId(input.aliasText);
+  if (!id || !input.customerId) return;
+  const ref = doc(customerAliasesCol, id);
+  await setDoc(
+    ref,
+    {
+      aliasText: input.aliasText,
+      displayText: input.displayText,
+      customerId: input.customerId,
+      customerName: input.customerName,
+      count: increment(1),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+// --- Preferencias de cliente (instrucoes recorrentes por cliente) ---
+export async function listCustomerPreferences(): Promise<CustomerPreference[]> {
+  const snap = await getDocs(customerPreferencesCol);
+  const rows = snap.docs.map((d) => {
+    const raw = d.data() as Record<string, unknown>;
+    return {
+      id: d.id,
+      customerId: String(raw.customerId ?? ""),
+      customerName: String(raw.customerName ?? ""),
+      text: String(raw.text ?? ""),
+      count: Number(raw.count ?? 0),
+      updatedAt: raw.updatedAt,
+    } satisfies CustomerPreference;
+  });
+  return rows.sort((a, b) => b.count - a.count);
+}
+
+export async function upsertCustomerPreference(
+  input: UpsertCustomerPreferenceInput,
+): Promise<void> {
+  const key = input.text.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 100);
+  if (!input.customerId || !key) return;
+  const id = `${input.customerId}__${key}`;
+  const ref = doc(customerPreferencesCol, id);
+  await setDoc(
+    ref,
+    {
+      customerId: input.customerId,
+      customerName: input.customerName,
+      text: input.text.trim(),
+      count: increment(1),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+// --- Unidade preferida por produto ---
+export async function listProductUnitPrefs(): Promise<ProductUnitPref[]> {
+  const snap = await getDocs(productUnitPrefsCol);
+  return snap.docs.map((d) => {
+    const raw = d.data() as Record<string, unknown>;
+    const counts = (raw.unitCounts as Record<string, unknown>) ?? {};
+    const unitCounts: Record<string, number> = {};
+    Object.keys(counts).forEach((k) => {
+      unitCounts[k] = Number(counts[k] ?? 0);
+    });
+    return {
+      id: d.id,
+      productId: String(raw.productId ?? d.id),
+      productName: String(raw.productName ?? ""),
+      unitCounts,
+      updatedAt: raw.updatedAt,
+    } satisfies ProductUnitPref;
+  });
+}
+
+export async function bumpProductUnitPref(
+  input: BumpProductUnitPrefInput,
+): Promise<void> {
+  const unit = (input.unit ?? "").trim();
+  if (!input.productId || !unit) return;
+  const ref = doc(productUnitPrefsCol, input.productId);
+  await setDoc(
+    ref,
+    {
+      productId: input.productId,
+      productName: input.productName,
+      unitCounts: { [unit]: increment(1) },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+// --- Correcoes (aprendizagem negativa: evitar mapeamentos errados) ---
+export async function listAiCorrections(): Promise<AiCorrection[]> {
+  const snap = await getDocs(aiCorrectionsCol);
+  const rows = snap.docs.map((d) => {
+    const raw = d.data() as Record<string, unknown>;
+    return {
+      id: d.id,
+      aliasText: String(raw.aliasText ?? ""),
+      displayText: String(raw.displayText ?? ""),
+      fromProductId: String(raw.fromProductId ?? ""),
+      fromProductName: String(raw.fromProductName ?? ""),
+      toProductId: String(raw.toProductId ?? ""),
+      toProductName: String(raw.toProductName ?? ""),
+      count: Number(raw.count ?? 0),
+      updatedAt: raw.updatedAt,
+    } satisfies AiCorrection;
+  });
+  return rows.sort((a, b) => b.count - a.count);
+}
+
+export async function upsertAiCorrection(
+  input: UpsertAiCorrectionInput,
+): Promise<void> {
+  const id = safeDocId(input.aliasText);
+  if (!id || !input.toProductId) return;
+  const ref = doc(aiCorrectionsCol, id);
+  await setDoc(
+    ref,
+    {
+      aliasText: input.aliasText,
+      displayText: input.displayText,
+      fromProductId: input.fromProductId,
+      fromProductName: input.fromProductName,
+      toProductId: input.toProductId,
+      toProductName: input.toProductName,
       count: increment(1),
       updatedAt: serverTimestamp(),
     },

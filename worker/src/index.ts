@@ -26,6 +26,7 @@ interface AnalyzePayload {
   }>;
   allowedUnits: string[];
   aliases: Array<{ canonical: string; aliases: string[] }>;
+  corrections: Array<{ rawText: string; avoidProductName: string; useProductName: string }>;
 }
 
 const GOOGLE_JWKS = createRemoteJWKSet(
@@ -174,6 +175,18 @@ function validatePayload(payload: unknown, maxImagesPerRequest: number): Analyze
         };
       })
     : [];
+  const corrections = Array.isArray(body.corrections)
+    ? body.corrections
+        .map((entry) => {
+          const row = entry as Record<string, unknown>;
+          return {
+            rawText: String(row.rawText || ""),
+            avoidProductName: String(row.avoidProductName || ""),
+            useProductName: String(row.useProductName || ""),
+          };
+        })
+        .filter((c) => c.rawText && c.useProductName)
+    : [];
 
   if (!sourcePrintId) throw new Error("sourcePrintId is required.");
   if (!weekId) throw new Error("weekId is required.");
@@ -205,6 +218,7 @@ function validatePayload(payload: unknown, maxImagesPerRequest: number): Analyze
     catalogProducts: catalogProducts as AnalyzePayload["catalogProducts"],
     allowedUnits,
     aliases,
+    corrections,
   };
 }
 
@@ -340,6 +354,7 @@ async function callOpenAi(env: Env, payload: AnalyzePayload): Promise<unknown> {
     "Each catalog product may include an 'aliases' list and there is a 'learnedAliases' map (canonical -> aliases) built from past human validations.",
     "When the raw text matches (case/accent-insensitive) a product alias or learned alias, map it to that product's productId with high confidence.",
     "Prefer these learned aliases over guessing; they encode previous corrections.",
+    "There is a 'humanCorrections' list of past human fixes: each has rawText, avoidProductName and useProductName. When the raw text matches (case/accent-insensitive) a correction's rawText, you MUST NOT map it to avoidProductName; map it to useProductName instead.",
     "Extract customer details when visible in the screenshot: displayName (name), addressRaw (full delivery address/morada) and nifRaw (Portuguese tax number NIF/contribuinte, 9 digits). Use null when a field is not present.",
     "Sometimes there is NO phone number, only a customer name (e.g. the WhatsApp contact/chat name at the top). In that case set phoneRaw to null but ALWAYS fill displayName with that name, so the customer can be matched by name.",
     "generalNotes must contain ONLY delivery instructions and product-specific requests. Do NOT put product lines, quantities, prices or the order itself in notes.",
@@ -356,6 +371,7 @@ async function callOpenAi(env: Env, payload: AnalyzePayload): Promise<unknown> {
     `allowedUnits: ${JSON.stringify(payload.allowedUnits)}`,
     `catalogProducts: ${JSON.stringify(payload.catalogProducts)}`,
     `learnedAliases: ${JSON.stringify(payload.aliases)}`,
+    `humanCorrections: ${JSON.stringify(payload.corrections)}`,
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {

@@ -12,6 +12,7 @@ export interface AnalyzePrintInput {
   imageDataUrl: string;
   allowedUnits: string[];
   aliases: Array<{ canonical: string; aliases: string[] }>;
+  corrections?: Array<{ rawText: string; avoidProductName: string; useProductName: string }>;
   language?: "pt-PT" | "pt-BR";
 }
 
@@ -149,6 +150,7 @@ export function createAiOrderImportService(config: {
             catalogProducts: input.catalogProducts,
             allowedUnits: input.allowedUnits,
             aliases: input.aliases,
+            corrections: input.corrections ?? [],
           }),
         });
 

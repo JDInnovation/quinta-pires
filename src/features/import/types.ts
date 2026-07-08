@@ -176,3 +176,70 @@ export interface UpsertProductAliasInput {
   productId: string;
   productName: string;
 }
+
+export interface CustomerAlias {
+  id: string;
+  aliasText: string;
+  displayText: string;
+  customerId: string;
+  customerName: string;
+  count: number;
+  updatedAt?: unknown;
+}
+
+export interface UpsertCustomerAliasInput {
+  aliasText: string;
+  displayText: string;
+  customerId: string;
+  customerName: string;
+}
+
+export interface CustomerPreference {
+  id: string;
+  customerId: string;
+  customerName: string;
+  text: string;
+  count: number;
+  updatedAt?: unknown;
+}
+
+export interface UpsertCustomerPreferenceInput {
+  customerId: string;
+  customerName: string;
+  text: string;
+}
+
+export interface ProductUnitPref {
+  id: string;
+  productId: string;
+  productName: string;
+  unitCounts: Record<string, number>;
+  updatedAt?: unknown;
+}
+
+export interface BumpProductUnitPrefInput {
+  productId: string;
+  productName: string;
+  unit: string;
+}
+
+export interface AiCorrection {
+  id: string;
+  aliasText: string;
+  displayText: string;
+  fromProductId: string;
+  fromProductName: string;
+  toProductId: string;
+  toProductName: string;
+  count: number;
+  updatedAt?: unknown;
+}
+
+export interface UpsertAiCorrectionInput {
+  aliasText: string;
+  displayText: string;
+  fromProductId: string;
+  fromProductName: string;
+  toProductId: string;
+  toProductName: string;
+}

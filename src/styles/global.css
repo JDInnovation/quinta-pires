@@ -3651,6 +3651,107 @@ input[type="checkbox"] {
   display: inline-block;
 }
 
+/* AI memory panel (o que a IA aprendeu) */
+.ai-memory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.ai-memory-card {
+  border: 1px solid var(--border-subtle, rgba(134, 169, 139, 0.18));
+  border-radius: var(--radius-md, 12px);
+  padding: 0.85rem 0.95rem;
+  background: var(--bg-surface, rgba(255, 255, 255, 0.02));
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ai-memory-card--wide {
+  grid-column: 1 / -1;
+}
+
+.ai-memory-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ai-memory-card-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.ai-memory-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent, #34d399);
+}
+
+.ai-memory-list {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ai-memory-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.ai-memory-from {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.ai-memory-to {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ai-memory-wrong {
+  color: #ef4444;
+  text-decoration: line-through;
+}
+
+.ai-memory-arrow {
+  color: var(--text-tertiary, rgba(134, 169, 139, 0.6));
+  font-size: 0.75rem;
+}
+
+.ai-memory-unit {
+  font-weight: 600;
+  color: var(--accent, #34d399);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+}
+
+.ai-memory-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-tertiary, rgba(134, 169, 139, 0.6));
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-memory-item--correction .ai-memory-count {
+  margin-left: 0.25rem;
+}
+
 /* Anomaly list */
 .insights-anomaly-list {
   list-style: none;
