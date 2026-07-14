@@ -374,37 +374,49 @@ async function callOpenAi(env: Env, payload: AnalyzePayload): Promise<unknown> {
     `humanCorrections: ${JSON.stringify(payload.corrections)}`,
   ].join("\n");
 
+  const model = env.OPENAI_MODEL || "gpt-4o";
+  // Modelos GPT-5 e da serie "o" (raciocinio) usam max_completion_tokens e
+  // rejeitam max_tokens. Precisam de mais budget por causa dos tokens internos.
+  const usesCompletionTokens = /^(gpt-5|o1|o3|o4)/i.test(model);
+
+  const requestBody: Record<string, unknown> = {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userPrompt },
+          { type: "image_url", image_url: { url: payload.imageDataUrl } },
+        ],
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "order_analysis",
+        schema,
+        strict: true,
+      },
+    },
+  };
+
+  if (usesCompletionTokens) {
+    requestBody.max_completion_tokens = 4000;
+  } else {
+    requestBody.max_tokens = 1400;
+  }
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: env.OPENAI_MODEL || "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userPrompt },
-            { type: "image_url", image_url: { url: payload.imageDataUrl } },
-          ],
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "order_analysis",
-          schema,
-          strict: true,
-        },
-      },
-      max_tokens: 1400,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
