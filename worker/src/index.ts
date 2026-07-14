@@ -381,7 +381,7 @@ async function callOpenAi(env: Env, payload: AnalyzePayload): Promise<unknown> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: env.OPENAI_MODEL || "gpt-5.6",
+      model: env.OPENAI_MODEL || "gpt-4o",
       messages: [
         {
           role: "system",
