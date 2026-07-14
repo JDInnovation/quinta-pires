@@ -585,3 +585,57 @@ export async function exportAccountSheetPdf() {
   drawFooter(doc);
   doc.save(`folha-de-contas-${today.replace(/\//g, "-")}.pdf`);
 }
+
+/* ================================================================
+   4) Catálogo — todos os produtos e preços (letra grande, legível)
+   ================================================================ */
+export async function exportCatalogPdf(products: Product[]) {
+  if (!products.length) {
+    toast.error("Não há produtos no catálogo.");
+    return;
+  }
+
+  const logo = await loadCachedImage(logoUrl);
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const today = new Date().toLocaleDateString("pt-PT");
+  const startY = drawHeader(doc, "Catálogo de Produtos", today, logo);
+
+  const sorted = [...products].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-PT", { sensitivity: "base" }),
+  );
+
+  const rows = sorted.map((p) => [
+    p.name,
+    formatUnitLabel(p.unit),
+    `${formatMoney(p.price)} / ${formatUnitLabel(p.unit)}`,
+  ]);
+
+  doc.setFontSize(11);
+  doc.setTextColor(...BRAND.muted);
+  doc.text(`${sorted.length} produto(s)`, 40, startY - 4);
+  doc.setTextColor(...BRAND.text);
+
+  autoTable(doc, {
+    startY,
+    head: [["Produto", "Unidade", "Preço"]],
+    body: rows,
+    ...tableTheme,
+    styles: {
+      ...tableTheme.styles,
+      fontSize: 15,
+      cellPadding: { top: 9, right: 8, bottom: 9, left: 8 },
+    },
+    headStyles: {
+      ...tableTheme.headStyles,
+      fontSize: 13,
+    },
+    columnStyles: {
+      0: { cellWidth: 300, fontStyle: "bold" },
+      1: { halign: "center", cellWidth: 90 },
+      2: { halign: "right", cellWidth: 125, fontStyle: "bold" },
+    },
+  });
+
+  drawFooter(doc);
+  doc.save(`catalogo-produtos-${today.replace(/\//g, "-")}.pdf`);
+}

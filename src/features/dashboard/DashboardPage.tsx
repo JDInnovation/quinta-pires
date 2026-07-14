@@ -20,6 +20,7 @@ import {
   exportPickingListPdf,
   exportCustomerSheetsPdf,
   exportAccountSheetPdf,
+  exportCatalogPdf,
 } from "../../utils/pdfExports";
 
 /**
@@ -356,6 +357,7 @@ const DashboardPage: React.FC = () => {
   const handleExportProducts = () => exportPickingListPdf(orders, products);
   const handleExportCustomerSheets = () => exportCustomerSheetsPdf(orders, customers, products);
   const handleExportAccountSheet = () => exportAccountSheetPdf();
+  const handleExportCatalog = () => exportCatalogPdf(products);
 
   return (
     <div className="page dashboard-page">
@@ -381,6 +383,9 @@ const DashboardPage: React.FC = () => {
             </button>
             <button type="button" className="btn-secondary" onClick={handleExportAccountSheet}>
               PDF – Folha de contas
+            </button>
+            <button type="button" className="btn-secondary" onClick={handleExportCatalog}>
+              PDF – Catálogo
             </button>
           </div>
         </div>
