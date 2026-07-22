@@ -53,6 +53,15 @@ const BRAND = {
 };
 
 /* ================================================================
+   Layout constants (tudo alinhado com a largura da tabela)
+   ================================================================ */
+// Margem esquerda e largura util = soma das colunas da tabela do cliente
+// (180 + 70 + 70 + 120 = 440). As caixas usam a mesma largura para ficarem
+// alinhadas com a tabela.
+const CONTENT_LEFT = 40;
+const TABLE_WIDTH = 440;
+
+/* ================================================================
    Helpers
    ================================================================ */
 function getPreparingOrders(orders: Order[]): Order[] {
@@ -81,6 +90,32 @@ function formatMoney(value?: number): string {
   const v = typeof value === "number" ? value : 0;
   if (!v) return "—";
   return v.toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
+}
+
+/** Normaliza texto para comparacao (sem acentos, minusculas). */
+function normalizeText(value: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Extrai o qualificador de uma nota de produto removendo o nome do produto.
+ *  Ex: nota "Laranja Madura" + produto "Laranja" -> "Madura". */
+function productQualifier(note: string, productName: string): string {
+  const noteWords = note.trim().split(/\s+/);
+  const nameWords = productName.trim().split(/\s+/);
+  let i = 0;
+  while (
+    i < nameWords.length &&
+    i < noteWords.length &&
+    normalizeText(noteWords[i]) === normalizeText(nameWords[i])
+  ) {
+    i++;
+  }
+  const rest = noteWords.slice(i).join(" ").trim();
+  return rest || note.trim();
 }
 
 type TotalsByProductAndUnit = Map<string, Map<string, number>>;
@@ -209,14 +244,6 @@ function drawHeader(doc: jsPDF, title: string, today: string, logo: string | nul
   return lineY + 16; // Y position after header
 }
 
-/** Thin accent line separator */
-function drawSeparator(doc: jsPDF, y: number) {
-  const pw = doc.internal.pageSize.getWidth();
-  doc.setDrawColor(...BRAND.border);
-  doc.setLineWidth(0.5);
-  doc.line(40, y, pw - 40, y);
-}
-
 /** Footer on each page */
 function drawFooter(doc: jsPDF) {
   const pw = doc.internal.pageSize.getWidth();
@@ -258,7 +285,43 @@ function renderNifLine(
   return y + 22;
 }
 
-/** Caixa de destaque (callout) para notas dos produtos / instrucoes de entrega. */
+/** Desenha um cartao arredondado com barra de acento a esquerda que acompanha
+ *  os cantos redondos (a barra e feita com um retangulo arredondado por baixo,
+ *  coberto por um segundo retangulo com o fundo do cartao). Devolve o X onde o
+ *  conteudo do cartao deve comecar. */
+function drawCard(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  opts: {
+    bg: [number, number, number];
+    border: [number, number, number];
+    accent?: [number, number, number];
+  },
+): number {
+  const r = 6;
+  const barW = 4;
+  if (opts.accent) {
+    // Base (acento) com cantos redondos
+    doc.setFillColor(...opts.accent);
+    doc.roundedRect(x, y, w, h, r, r, "F");
+    // Conteudo por cima, deixando so a barra de acento visivel a esquerda
+    doc.setFillColor(...opts.bg);
+    doc.setDrawColor(...opts.border);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(x + barW, y, w - barW, h, r, r, "FD");
+    return x + barW;
+  }
+  doc.setFillColor(...opts.bg);
+  doc.setDrawColor(...opts.border);
+  doc.setLineWidth(0.75);
+  doc.roundedRect(x, y, w, h, r, r, "FD");
+  return x;
+}
+
+/** Caixa de destaque (callout) para instrucoes de entrega / notas internas. */
 function renderCallout(
   doc: jsPDF,
   y: number,
@@ -271,14 +334,13 @@ function renderCallout(
     icon?: string | null;
   },
 ): number {
-  const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
-  const mx = 40;
-  const boxW = pw - mx * 2;
-  const barW = 4;
+  const x = CONTENT_LEFT;
+  const boxW = TABLE_WIDTH;
   const padX = 12;
   const padY = 12;
-  const textX = mx + barW + padX;
+  const barW = 4;
+  const contentLeft = x + barW + padX;
   const textMaxW = boxW - barW - padX * 2;
   const titleH = 15;
   const lineH = 14;
@@ -299,22 +361,20 @@ function renderCallout(
     y = 40;
   }
 
-  // Caixa arredondada com contorno
-  doc.setFillColor(...opts.bg);
-  doc.setDrawColor(...opts.border);
-  doc.setLineWidth(0.75);
-  doc.roundedRect(mx, y, boxW, boxH, 5, 5, "FD");
-  // Barra de acento a esquerda
-  doc.setFillColor(...opts.accent);
-  doc.rect(mx, y + 3, barW, boxH - 6, "F");
+  // Cartao arredondado com barra de acento (cantos acompanhados)
+  drawCard(doc, x, y, boxW, boxH, {
+    bg: opts.bg,
+    border: opts.border,
+    accent: opts.accent,
+  });
 
   // Titulo (com icone opcional)
   const titleY = y + padY + 4;
-  let titleX = textX;
+  let titleX = contentLeft;
   if (opts.icon) {
     const iconSize = 13;
-    doc.addImage(opts.icon, "PNG", textX, titleY - iconSize + 3, iconSize, iconSize);
-    titleX = textX + iconSize + 5;
+    doc.addImage(opts.icon, "PNG", contentLeft, titleY - iconSize + 3, iconSize, iconSize);
+    titleX = contentLeft + iconSize + 5;
   }
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
@@ -325,7 +385,7 @@ function renderCallout(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   doc.setTextColor(...BRAND.text);
-  doc.text(wrapped, textX, titleY + lineH + 2);
+  doc.text(wrapped, contentLeft, titleY + lineH + 2);
 
   return y + boxH + 12;
 }
@@ -465,28 +525,37 @@ export async function exportCustomerSheetsPdf(
 
     const startY = drawHeader(doc, name, today, logo);
 
-    // Customer info box
-    const pw = doc.internal.pageSize.getWidth();
-    doc.setFillColor(245, 250, 246);
-    doc.roundedRect(40, startY - 6, pw - 80, 62, 4, 4, "F");
+    // Caixa de info do cliente (mesmo aspeto dos restantes cartoes)
+    const infoBoxTop = startY - 6;
+    const infoBoxH = 58;
+    const infoContentLeft =
+      drawCard(doc, CONTENT_LEFT, infoBoxTop, TABLE_WIDTH, infoBoxH, {
+        bg: BRAND.stripe,
+        border: BRAND.border,
+        accent: BRAND.green,
+      }) + 12;
 
-    let infoY = startY + 8;
+    let infoY = startY + 12;
 
     // Phone — prominent
     if (c?.phone) {
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...BRAND.dark);
-      doc.text(`Tel: ${c.phone}`, 52, infoY);
+      doc.text(`Tel: ${c.phone}`, infoContentLeft, infoY);
       infoY += 16;
     }
 
-    // Address — prominent
+    // Address — prominent (truncada a 1 linha dentro do cartao)
     if (c?.address) {
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...BRAND.dark);
-      doc.text(`Morada: ${c.address}`, 52, infoY);
+      const addrLines = doc.splitTextToSize(
+        `Morada: ${c.address}`,
+        TABLE_WIDTH - 28,
+      ) as string[];
+      doc.text(addrLines[0], infoContentLeft, infoY);
       infoY += 14;
     }
 
@@ -516,7 +585,40 @@ export async function exportCustomerSheetsPdf(
       rows.push(["Saco", "1 un", formatMoney(1), ""]);
     }
 
-    drawSeparator(doc, startY + 62);
+    // Segmenta e classifica as notas das encomendas.
+    const segments = collectNoteSegments(custOrders);
+    const deliveryNotes = segments.filter((s) => classifyNote(s) === "delivery");
+    const productNotes = segments.filter((s) => classifyNote(s) === "product");
+    const internalNotes = segments.filter((s) => classifyNote(s) === "internal");
+
+    // Associa cada nota de produto a linha do respetivo produto (match por nome).
+    // A nota fica escrita na propria linha, por baixo do nome do produto.
+    const usedProductNotes = new Set<number>();
+    const rowNotes: string[] = rows.map((row) => {
+      const pname = String(row[0]);
+      for (let idx = 0; idx < productNotes.length; idx++) {
+        if (usedProductNotes.has(idx)) continue;
+        if (normalizeText(productNotes[idx]).includes(normalizeText(pname))) {
+          usedProductNotes.add(idx);
+          return productQualifier(productNotes[idx], pname);
+        }
+      }
+      return "";
+    });
+
+    // Reserva uma segunda linha na celula do nome quando ha nota a desenhar.
+    rows.forEach((row, i) => {
+      if (rowNotes[i]) row[0] = `${row[0]}\n `;
+    });
+
+    // Notas de produto que nao casaram com nenhuma linha vao para as notas internas.
+    const leftoverProductNotes = productNotes.filter((_, idx) => !usedProductNotes.has(idx));
+    const remainingInternal = [...internalNotes, ...leftoverProductNotes];
+
+    // Separador alinhado com a largura da tabela.
+    doc.setDrawColor(...BRAND.border);
+    doc.setLineWidth(0.5);
+    doc.line(CONTENT_LEFT, startY + 62, CONTENT_LEFT + TABLE_WIDTH, startY + 62);
 
     autoTable(doc, {
       startY: startY + 70,
@@ -529,32 +631,30 @@ export async function exportCustomerSheetsPdf(
         2: { halign: "right", cellWidth: 70 },
         3: { halign: "center", cellWidth: 120 },
       },
+      // Escreve a nota do produto (estado/qualidade) na propria linha, por baixo
+      // do nome, em italico e cor de destaque.
+      didDrawCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 0) return;
+        const note = rowNotes[data.row.index];
+        if (!note) return;
+        const { x, y: cy, height } = data.cell;
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8);
+        doc.setTextColor(...BRAND.green);
+        doc.text(note, x + 6, cy + height - 6);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(...BRAND.text);
+      },
     });
 
     // Estrutura por baixo da tabela de produtos:
     //  1) NIF (icone de atencao) imediatamente por baixo da ultima linha;
-    //  2) notas dos produtos (estado/qualidade) logo a seguir ao "Peso Real";
-    //  3) instrucoes de entrega (horario, onde deixar, morada alternativa);
-    //  4) eventuais notas internas restantes.
+    //  2) instrucoes de entrega (horario, onde deixar, morada alternativa);
+    //  3) eventuais notas internas restantes.
     let blockY = (((doc as any).lastAutoTable?.finalY as number) ?? startY + 70) + 18;
 
     if (c?.nif) {
       blockY = renderNifLine(doc, blockY, c.nif, warningImg);
-    }
-
-    const segments = collectNoteSegments(custOrders);
-    const productNotes = segments.filter((s) => classifyNote(s) === "product");
-    const deliveryNotes = segments.filter((s) => classifyNote(s) === "delivery");
-    const internalNotes = segments.filter((s) => classifyNote(s) === "internal");
-
-    if (productNotes.length) {
-      blockY = renderCallout(doc, blockY, {
-        title: "Notas dos produtos",
-        items: productNotes,
-        bg: BRAND.productBg,
-        border: BRAND.productBorder,
-        accent: BRAND.green,
-      });
     }
 
     if (deliveryNotes.length) {
@@ -568,10 +668,10 @@ export async function exportCustomerSheetsPdf(
       });
     }
 
-    if (internalNotes.length) {
+    if (remainingInternal.length) {
       blockY = renderCallout(doc, blockY, {
         title: "Notas internas",
-        items: internalNotes,
+        items: remainingInternal,
         bg: BRAND.stripe,
         border: BRAND.border,
         accent: BRAND.muted,
