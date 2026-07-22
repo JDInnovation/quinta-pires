@@ -158,7 +158,8 @@ function collectNoteSegments(orders: Order[]): string[] {
   const segments: string[] = [];
   orders.forEach((o) => {
     (o.notes ?? "")
-      .split("|")
+      // Separadores possiveis entre instrucoes: "|", nova linha, ";" e bullets.
+      .split(/[|\n;•·]+/)
       .map((part) => part.trim())
       .forEach((part) => {
         if (!part || IMPORT_ID_RE.test(part)) return;
@@ -183,6 +184,37 @@ function classifyNote(segment: string): NoteKind {
   if (DELIVERY_RE.test(segment)) return "delivery";
   if (PRODUCT_STATE_RE.test(segment)) return "product";
   return "internal";
+}
+
+/** Distribui os segmentos por entrega / produto / interno. Quando um segmento
+ *  tem sinais de AMBOS (ex: "Entrega apos as 18H, tomate maduro") divide-o por
+ *  virgulas/"e"/bullets e classifica cada pedaco separadamente. */
+function distributeNoteSegments(segments: string[]): {
+  delivery: string[];
+  product: string[];
+  internal: string[];
+} {
+  const delivery: string[] = [];
+  const product: string[] = [];
+  const internal: string[] = [];
+
+  segments.forEach((seg) => {
+    const mixed = DELIVERY_RE.test(seg) && PRODUCT_STATE_RE.test(seg);
+    const pieces = mixed
+      ? seg
+          .split(/,| e (?=\S)/i)
+          .map((p) => p.trim())
+          .filter(Boolean)
+      : [seg];
+    pieces.forEach((piece) => {
+      const kind = classifyNote(piece);
+      if (kind === "delivery") delivery.push(piece);
+      else if (kind === "product") product.push(piece);
+      else internal.push(piece);
+    });
+  });
+
+  return { delivery, product, internal };
 }
 
 /** IDs de referencia da importacao IA presentes nas notas das encomendas. */
@@ -525,17 +557,31 @@ export async function exportCustomerSheetsPdf(
 
     const startY = drawHeader(doc, name, today, logo);
 
-    // Caixa de info do cliente (mesmo aspeto dos restantes cartoes)
+    // Caixa de info do cliente (mesmo aspeto dos restantes cartoes).
+    // Altura dinamica: a morada quebra para varias linhas quando e comprida.
     const infoBoxTop = startY - 6;
-    const infoBoxH = 58;
+    const infoPadLeft = 12;
+    const infoTextMaxW = TABLE_WIDTH - 4 - infoPadLeft * 2;
+
+    let addrLines: string[] = [];
+    if (c?.address) {
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      addrLines = doc.splitTextToSize(`Morada: ${c.address}`, infoTextMaxW) as string[];
+    }
+
+    const phoneH = c?.phone ? 16 : 0;
+    const addrH = addrLines.length * 14;
+    const infoBoxH = Math.max(40, 14 + phoneH + addrH);
+
     const infoContentLeft =
       drawCard(doc, CONTENT_LEFT, infoBoxTop, TABLE_WIDTH, infoBoxH, {
         bg: BRAND.stripe,
         border: BRAND.border,
         accent: BRAND.green,
-      }) + 12;
+      }) + infoPadLeft;
 
-    let infoY = startY + 12;
+    let infoY = infoBoxTop + 20;
 
     // Phone — prominent
     if (c?.phone) {
@@ -546,20 +592,22 @@ export async function exportCustomerSheetsPdf(
       infoY += 16;
     }
 
-    // Address — prominent (truncada a 1 linha dentro do cartao)
-    if (c?.address) {
+    // Address — prominent (quebra para varias linhas se necessario)
+    if (addrLines.length) {
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...BRAND.dark);
-      const addrLines = doc.splitTextToSize(
-        `Morada: ${c.address}`,
-        TABLE_WIDTH - 28,
-      ) as string[];
-      doc.text(addrLines[0], infoContentLeft, infoY);
-      infoY += 14;
+      addrLines.forEach((ln) => {
+        doc.text(ln, infoContentLeft, infoY);
+        infoY += 14;
+      });
     }
 
     doc.setTextColor(...BRAND.text);
+
+    const infoBoxBottom = infoBoxTop + infoBoxH;
+    const separatorY = infoBoxBottom + 10;
+    const tableStartY = separatorY + 8;
 
     // Aggregate products
     const totals: TotalsByProductAndUnit = new Map();
@@ -587,9 +635,8 @@ export async function exportCustomerSheetsPdf(
 
     // Segmenta e classifica as notas das encomendas.
     const segments = collectNoteSegments(custOrders);
-    const deliveryNotes = segments.filter((s) => classifyNote(s) === "delivery");
-    const productNotes = segments.filter((s) => classifyNote(s) === "product");
-    const internalNotes = segments.filter((s) => classifyNote(s) === "internal");
+    const { delivery: deliveryNotes, product: productNotes, internal: internalNotes } =
+      distributeNoteSegments(segments);
 
     // Associa cada nota de produto a linha do respetivo produto (match por nome).
     // A nota fica escrita na propria linha, por baixo do nome do produto.
@@ -618,10 +665,10 @@ export async function exportCustomerSheetsPdf(
     // Separador alinhado com a largura da tabela.
     doc.setDrawColor(...BRAND.border);
     doc.setLineWidth(0.5);
-    doc.line(CONTENT_LEFT, startY + 62, CONTENT_LEFT + TABLE_WIDTH, startY + 62);
+    doc.line(CONTENT_LEFT, separatorY, CONTENT_LEFT + TABLE_WIDTH, separatorY);
 
     autoTable(doc, {
-      startY: startY + 70,
+      startY: tableStartY,
       head: [["Produto", "Qtd. Planeada", "Preço/un.", "Peso Real"]],
       body: rows,
       ...tableTheme,
