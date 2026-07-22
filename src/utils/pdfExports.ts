@@ -55,11 +55,11 @@ const BRAND = {
 /* ================================================================
    Layout constants (tudo alinhado com a largura da tabela)
    ================================================================ */
-// Margem esquerda e largura util = soma das colunas da tabela do cliente
-// (180 + 70 + 70 + 120 = 440). As caixas usam a mesma largura para ficarem
-// alinhadas com a tabela.
+// Margem esquerda e largura util. A largura ocupa quase toda a folha A4
+// (595pt - 2*40 de margem = 515) e as colunas da tabela somam esse valor,
+// para o conteudo preencher a pagina em vez de ficar espaco livre a direita.
 const CONTENT_LEFT = 40;
-const TABLE_WIDTH = 440;
+const TABLE_WIDTH = 515;
 
 /* ================================================================
    Helpers
@@ -298,23 +298,23 @@ function renderNifLine(
   warningImg: string | null,
 ): number {
   const ph = doc.internal.pageSize.getHeight();
-  if (y + 24 > ph - 45) {
+  if (y + 26 > ph - 45) {
     doc.addPage();
     y = 40;
   }
   const mx = 40;
   let x = mx;
   if (warningImg) {
-    const iconSize = 14;
-    doc.addImage(warningImg, "PNG", x, y - iconSize + 4, iconSize, iconSize);
-    x += iconSize + 6;
+    const iconSize = 16;
+    doc.addImage(warningImg, "PNG", x, y - iconSize + 5, iconSize, iconSize);
+    x += iconSize + 7;
   }
-  doc.setFontSize(12);
+  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BRAND.dark);
-  doc.text(`NIF: ${nif}`, x, y + 4);
+  doc.text(`NIF: ${nif}`, x, y + 5);
   doc.setTextColor(...BRAND.text);
-  return y + 22;
+  return y + 26;
 }
 
 /** Desenha um cartao arredondado com barra de acento a esquerda que acompanha
@@ -369,17 +369,17 @@ function renderCallout(
   const ph = doc.internal.pageSize.getHeight();
   const x = CONTENT_LEFT;
   const boxW = TABLE_WIDTH;
-  const padX = 12;
-  const padY = 12;
-  const barW = 4;
+  const padX = 14;
+  const padY = 14;
+  const barW = 5;
   const contentLeft = x + barW + padX;
   const textMaxW = boxW - barW - padX * 2;
-  const titleH = 15;
-  const lineH = 14;
+  const titleH = 18;
+  const lineH = 16;
 
   // Pre-calcula as linhas do corpo (quebra de texto)
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
+  doc.setFontSize(12);
   const wrapped: string[] = [];
   opts.items.forEach((it) => {
     const lines = doc.splitTextToSize(`•  ${it}`, textMaxW) as string[];
@@ -401,25 +401,25 @@ function renderCallout(
   });
 
   // Titulo (com icone opcional)
-  const titleY = y + padY + 4;
+  const titleY = y + padY + 5;
   let titleX = contentLeft;
   if (opts.icon) {
-    const iconSize = 13;
+    const iconSize = 15;
     doc.addImage(opts.icon, "PNG", contentLeft, titleY - iconSize + 3, iconSize, iconSize);
-    titleX = contentLeft + iconSize + 5;
+    titleX = contentLeft + iconSize + 6;
   }
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(13);
   doc.setTextColor(...opts.accent);
   doc.text(opts.title, titleX, titleY);
 
   // Corpo
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
+  doc.setFontSize(12);
   doc.setTextColor(...BRAND.text);
-  doc.text(wrapped, contentLeft, titleY + lineH + 2);
+  doc.text(wrapped, contentLeft, titleY + lineH + 3);
 
-  return y + boxH + 12;
+  return y + boxH + 14;
 }
 
 /** Shared autoTable theme */
@@ -560,19 +560,19 @@ export async function exportCustomerSheetsPdf(
     // Caixa de info do cliente (mesmo aspeto dos restantes cartoes).
     // Altura dinamica: a morada quebra para varias linhas quando e comprida.
     const infoBoxTop = startY - 6;
-    const infoPadLeft = 12;
-    const infoTextMaxW = TABLE_WIDTH - 4 - infoPadLeft * 2;
+    const infoPadLeft = 14;
+    const infoTextMaxW = TABLE_WIDTH - 5 - infoPadLeft * 2;
 
     let addrLines: string[] = [];
     if (c?.address) {
-      doc.setFontSize(11);
+      doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
       addrLines = doc.splitTextToSize(`Morada: ${c.address}`, infoTextMaxW) as string[];
     }
 
-    const phoneH = c?.phone ? 16 : 0;
-    const addrH = addrLines.length * 14;
-    const infoBoxH = Math.max(40, 14 + phoneH + addrH);
+    const phoneH = c?.phone ? 20 : 0;
+    const addrH = addrLines.length * 17;
+    const infoBoxH = Math.max(46, 16 + phoneH + addrH);
 
     const infoContentLeft =
       drawCard(doc, CONTENT_LEFT, infoBoxTop, TABLE_WIDTH, infoBoxH, {
@@ -581,25 +581,25 @@ export async function exportCustomerSheetsPdf(
         accent: BRAND.green,
       }) + infoPadLeft;
 
-    let infoY = infoBoxTop + 20;
+    let infoY = infoBoxTop + 24;
 
     // Phone — prominent
     if (c?.phone) {
-      doc.setFontSize(12);
+      doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...BRAND.dark);
       doc.text(`Tel: ${c.phone}`, infoContentLeft, infoY);
-      infoY += 16;
+      infoY += 20;
     }
 
     // Address — prominent (quebra para varias linhas se necessario)
     if (addrLines.length) {
-      doc.setFontSize(11);
+      doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...BRAND.dark);
       addrLines.forEach((ln) => {
         doc.text(ln, infoContentLeft, infoY);
-        infoY += 14;
+        infoY += 17;
       });
     }
 
@@ -672,11 +672,20 @@ export async function exportCustomerSheetsPdf(
       head: [["Produto", "Qtd. Planeada", "Preço/un.", "Peso Real"]],
       body: rows,
       ...tableTheme,
+      styles: {
+        ...tableTheme.styles,
+        fontSize: 11,
+        cellPadding: { top: 7, right: 8, bottom: 7, left: 8 },
+      },
+      headStyles: {
+        ...tableTheme.headStyles,
+        fontSize: 10,
+      },
       columnStyles: {
-        0: { cellWidth: 180, fontStyle: "bold" },
-        1: { halign: "center", cellWidth: 70 },
-        2: { halign: "right", cellWidth: 70 },
-        3: { halign: "center", cellWidth: 120 },
+        0: { cellWidth: 240, fontStyle: "bold" },
+        1: { halign: "center", cellWidth: 85 },
+        2: { halign: "right", cellWidth: 80 },
+        3: { halign: "center", cellWidth: 110 },
       },
       // Escreve a nota do produto (estado/qualidade) na propria linha, por baixo
       // do nome, em italico e cor de destaque.
@@ -686,9 +695,9 @@ export async function exportCustomerSheetsPdf(
         if (!note) return;
         const { x, y: cy, height } = data.cell;
         doc.setFont("helvetica", "italic");
-        doc.setFontSize(8);
+        doc.setFontSize(10);
         doc.setTextColor(...BRAND.green);
-        doc.text(note, x + 6, cy + height - 6);
+        doc.text(note, x + 8, cy + height - 7);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(...BRAND.text);
       },
