@@ -298,7 +298,7 @@ function renderNifLine(
   warningImg: string | null,
 ): number {
   const ph = doc.internal.pageSize.getHeight();
-  if (y + 26 > ph - 45) {
+  if (y + 26 > ph - 74) {
     doc.addPage();
     y = 40;
   }
@@ -388,7 +388,7 @@ function renderCallout(
 
   const boxH = padY + titleH + wrapped.length * lineH + padY - 4;
 
-  if (y + boxH > ph - 45) {
+  if (y + boxH > ph - 74) {
     doc.addPage();
     y = 40;
   }
@@ -420,6 +420,50 @@ function renderCallout(
   doc.text(wrapped, contentLeft, titleY + lineH + 3);
 
   return y + boxH + 14;
+}
+
+/** Aviso grande no fundo de cada pagina quando a folha de um cliente ocupa
+ *  mais do que uma pagina. Desenha em TODAS as paginas do cliente e repoe a
+ *  pagina atual na ultima (para o addPage seguinte continuar no fim). */
+function drawMultiPageBanner(
+  doc: jsPDF,
+  startPage: number,
+  endPage: number,
+  warningImg: string | null,
+) {
+  const total = endPage - startPage + 1;
+  const ph = doc.internal.pageSize.getHeight();
+  const boxH = 28;
+  const y = ph - 70;
+
+  for (let p = startPage; p <= endPage; p++) {
+    doc.setPage(p);
+    const idx = p - startPage + 1;
+
+    drawCard(doc, CONTENT_LEFT, y, TABLE_WIDTH, boxH, {
+      bg: BRAND.deliveryBg,
+      border: BRAND.deliveryBorder,
+      accent: BRAND.deliveryAccent,
+    });
+
+    let tx = CONTENT_LEFT + 5 + 12;
+    if (warningImg) {
+      const s = 18;
+      doc.addImage(warningImg, "PNG", tx, y + (boxH - s) / 2, s, s);
+      tx += s + 8;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(...BRAND.deliveryAccent);
+    doc.text(
+      `ATENÇÃO: esta folha tem ${total} páginas — página ${idx} de ${total}`,
+      tx,
+      y + boxH / 2 + 4,
+    );
+    doc.setTextColor(...BRAND.text);
+  }
+
+  doc.setPage(endPage);
 }
 
 /** Shared autoTable theme */
@@ -555,6 +599,9 @@ export async function exportCustomerSheetsPdf(
     const totalOrdersForCustomer = orders.filter((o) => o.customerId === cid).length;
     const isFirstTime = totalOrdersForCustomer === custOrders.length;
 
+    // Pagina onde comeca a folha deste cliente (para detetar se ocupa varias).
+    const startPage = doc.getNumberOfPages();
+
     const startY = drawHeader(doc, name, today, logo);
 
     // Caixa de info do cliente (mesmo aspeto dos restantes cartoes).
@@ -672,6 +719,8 @@ export async function exportCustomerSheetsPdf(
       head: [["Produto", "Qtd. Planeada", "Preço/un.", "Peso Real"]],
       body: rows,
       ...tableTheme,
+      // Reserva espaco no fundo para o aviso de multipaginas + rodape.
+      margin: { top: 40, left: CONTENT_LEFT, right: CONTENT_LEFT, bottom: 74 },
       styles: {
         ...tableTheme.styles,
         fontSize: 11,
@@ -743,6 +792,13 @@ export async function exportCustomerSheetsPdf(
       doc.setTextColor(...BRAND.muted);
       doc.text(`Ref. importacao IA: ${importRefIds.join(", ")}`, 40, ph - 32);
       doc.setTextColor(...BRAND.text);
+    }
+
+    // Se a folha deste cliente ocupou mais do que uma pagina, desenha um aviso
+    // grande no fundo de cada pagina a indicar o total de paginas.
+    const endPage = doc.getNumberOfPages();
+    if (endPage > startPage) {
+      drawMultiPageBanner(doc, startPage, endPage, warningImg);
     }
   });
 
