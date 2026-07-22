@@ -192,7 +192,26 @@ function formatQtyComponent(n: number): string {
   return isInt ? String(Math.round(n)) : String(n).replace(".", ",");
 }
 
-function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
+// Deteta a unidade escrita explicitamente pelo cliente no texto do print.
+// Hierarquia pedida: se escreveu gr/kg/kilo/etc -> "kg"; se u/un/uni/etc -> "un".
+// Devolve null quando nao ha nenhuma unidade escrita (deixa decidir a preferida).
+// Os lookarounds ((?<![a-z]) / (?![a-z])) garantem que so apanha a unidade como
+// token isolado (ex.: "2kg", "1,5 kg", "3un") e nao dentro de palavras
+// (ex.: "grelos", "uva", "kiwi" nao dao match).
+function detectExplicitUnit(rawText: string): "kg" | "un" | null {
+  const t = (rawText || "").toLowerCase();
+  if (!t) return null;
+  const KG_RE = /(?<![a-z])(kgs?|kilos?|quilos?|gramas?|grs?|gr|g|k)(?![a-z])/i;
+  const UN_RE = /(?<![a-z])(unidades?|unidade|unid|unis?|uni|un|u)(?![a-z])/i;
+  if (KG_RE.test(t)) return "kg";
+  if (UN_RE.test(t)) return "un";
+  return null;
+}
+
+function buildDraftFromRecord(
+  record: OrderImportRecord,
+  preferredUnitByProductId?: Map<string, string>,
+): CorrectedOrderDraft {
   const analysis = record.analysisResult;
   const rawItems = analysis?.order.items ?? [];
 
@@ -204,6 +223,7 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
     confidence: number;
     notes: string | null;
     components: number[];
+    rawTexts: string[];
   };
   const groups = new Map<string, Group>();
   const order: string[] = [];
@@ -217,6 +237,7 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
     if (existing) {
       existing.components.push(...components);
       existing.confidence = Math.min(existing.confidence, item.confidence);
+      if (item.rawQuantityText) existing.rawTexts.push(item.rawQuantityText);
     } else {
       groups.set(key, {
         productId: item.productId || "",
@@ -225,6 +246,7 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
         confidence: item.confidence,
         notes: item.notes,
         components: [...components],
+        rawTexts: item.rawQuantityText ? [item.rawQuantityText] : [],
       });
       order.push(key);
     }
@@ -232,10 +254,18 @@ function buildDraftFromRecord(record: OrderImportRecord): CorrectedOrderDraft {
 
   const items = order.map((key) => {
     const g = groups.get(key)!;
+    // Hierarquia de unidades:
+    // 1) o que o cliente escreveu (gr/kg/... -> kg | u/un/... -> un);
+    // 2) a unidade mais confirmada para o produto (preferida);
+    // 3) fallback: a unidade que a IA detetou.
+    const combinedRaw = `${g.productNameRaw} ${g.rawTexts.join(" ")}`;
+    const explicitUnit = detectExplicitUnit(combinedRaw);
+    const preferredUnit = g.productId ? preferredUnitByProductId?.get(g.productId) : undefined;
+    const unit = explicitUnit ?? preferredUnit ?? g.unit;
     return {
       productId: g.productId,
       quantity: g.components.reduce((a, b) => a + b, 0),
-      unit: g.unit,
+      unit,
       productNameRaw: g.productNameRaw,
       confidence: g.confidence,
       notes: g.notes,
@@ -591,7 +621,10 @@ const ImportOrdersPage: React.FC = () => {
 
           // Aplica aprendizagem ao rascunho: unidade preferida por produto e
           // preferencias/instrucoes recorrentes do cliente.
-          const baseDraft = buildDraftFromRecord({ analysisResult: mergedResult } as OrderImportRecord);
+          const baseDraft = buildDraftFromRecord(
+            { analysisResult: mergedResult } as OrderImportRecord,
+            preferredUnitByProductId,
+          );
           const learnedNotes = matchedCustomerId
             ? preferencesByCustomerId.get(matchedCustomerId) ?? []
             : [];
@@ -601,14 +634,6 @@ const ImportOrdersPage: React.FC = () => {
           );
           const draftWithLearning: CorrectedOrderDraft = {
             ...baseDraft,
-            items: baseDraft.items.map((item) => {
-              const preferred = item.productId
-                ? preferredUnitByProductId.get(item.productId)
-                : undefined;
-              return preferred && preferred !== item.unit
-                ? { ...item, unit: preferred }
-                : item;
-            }),
             notes: [existingNotes, ...notesToAdd].filter(Boolean).join(" | "),
           };
 
@@ -977,16 +1002,21 @@ const ImportOrdersPage: React.FC = () => {
       if (prev[selectedRecord.id]) return prev;
       return {
         ...prev,
-        [selectedRecord.id]: selectedRecord.correctedDraft ?? buildDraftFromRecord(selectedRecord),
+        [selectedRecord.id]:
+          selectedRecord.correctedDraft ??
+          buildDraftFromRecord(selectedRecord, preferredUnitByProductId),
       };
     });
 
     setNewCustomerName(selectedRecord.analysisResult?.customer.displayName ?? "");
     setNewCustomerAddress(selectedRecord.analysisResult?.customer.addressRaw ?? "");
     setNewCustomerNif(selectedRecord.analysisResult?.customer.nifRaw ?? "");
-  }, [selectedRecord]);
+  }, [selectedRecord, preferredUnitByProductId]);
 
-  const selectedDraft = selectedRecord ? draftById[selectedRecord.id] ?? buildDraftFromRecord(selectedRecord) : undefined;
+  const selectedDraft = selectedRecord
+    ? draftById[selectedRecord.id] ??
+      buildDraftFromRecord(selectedRecord, preferredUnitByProductId)
+    : undefined;
 
   const updateDraft = useCallback((recordId: string, patch: Partial<CorrectedOrderDraft>) => {
     setDraftById((prev) => ({

@@ -44,6 +44,12 @@ const BRAND = {
   stripe: [245, 250, 246] as [number, number, number],
   white: [255, 255, 255] as [number, number, number],
   border: [200, 215, 205] as [number, number, number],
+  // Callouts (notas dos produtos / instrucoes de entrega)
+  productBg: [240, 249, 244] as [number, number, number],
+  productBorder: [167, 214, 186] as [number, number, number],
+  deliveryBg: [255, 247, 224] as [number, number, number],
+  deliveryBorder: [251, 191, 36] as [number, number, number],
+  deliveryAccent: [180, 83, 9] as [number, number, number],
 };
 
 /* ================================================================
@@ -111,17 +117,37 @@ function buildQtyString(
 // Referencia interna gerada pela importacao IA (ex: "Importacao IA: abc123").
 const IMPORT_ID_RE = /Importa[çc][ãa]o\s*IA:\s*([^\s|]+)/i;
 
-/** Notas visiveis (sem o segmento tecnico "Importacao IA: <id>"). */
-function collectDisplayNotes(orders: Order[]): string[] {
-  const notes = orders.map((o) =>
+/** Segmentos individuais das notas (sem o segmento tecnico "Importacao IA: <id>"). */
+function collectNoteSegments(orders: Order[]): string[] {
+  const seen = new Set<string>();
+  const segments: string[] = [];
+  orders.forEach((o) => {
     (o.notes ?? "")
       .split("|")
       .map((part) => part.trim())
-      .filter((part) => part && !IMPORT_ID_RE.test(part))
-      .join(" | ")
-      .trim(),
-  );
-  return Array.from(new Set(notes.filter(Boolean)));
+      .forEach((part) => {
+        if (!part || IMPORT_ID_RE.test(part)) return;
+        const key = part.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        segments.push(part);
+      });
+  });
+  return segments;
+}
+
+// Deteta instrucoes de entrega: horarios, onde deixar, morada alternativa, etc.
+const DELIVERY_RE =
+  /entrega|entregar|deixar|portaria|campainha|vizinh|rece[cç][aã]o|morada|\brua\b|avenida|\bav\.?\b|\blote\b|\bandar\b|\bporta\b|hor[aá]rio|\b\d{1,2}[:h]\d{0,2}\b|ap[oó]s as|at[eé] as|antes das|depois das/i;
+// Deteta notas de estado/qualidade do produto (ex: "Laranja Madura", "Pepino Pequeno").
+const PRODUCT_STATE_RE =
+  /\b(madur[oa]s?|verdes?|verdinh\w*|pequen[oa]s?|grandes?|m[eé]di[oa]s?|frescos?|frescas?|doces?|amarel[oa]s?|molinh\w*|durinh\w*|rij[oa]s?)\b/i;
+
+type NoteKind = "delivery" | "product" | "internal";
+function classifyNote(segment: string): NoteKind {
+  if (DELIVERY_RE.test(segment)) return "delivery";
+  if (PRODUCT_STATE_RE.test(segment)) return "product";
+  return "internal";
 }
 
 /** IDs de referencia da importacao IA presentes nas notas das encomendas. */
@@ -205,44 +231,103 @@ function drawFooter(doc: jsPDF) {
   }
 }
 
-/** Notes block rendered below the last table */
-function renderNotesBlock(doc: jsPDF, notes: string[], warningImg: string | null) {
-  if (!notes.length) return;
-
-  const lastY = (doc as any).lastAutoTable?.finalY ?? 120;
+/** Linha do NIF, com icone de atencao, imediatamente por baixo da tabela. */
+function renderNifLine(
+  doc: jsPDF,
+  y: number,
+  nif: string,
+  warningImg: string | null,
+): number {
   const ph = doc.internal.pageSize.getHeight();
-  const pw = doc.internal.pageSize.getWidth();
+  if (y + 24 > ph - 45) {
+    doc.addPage();
+    y = 40;
+  }
   const mx = 40;
-  const maxW = pw - mx * 2;
+  let x = mx;
+  if (warningImg) {
+    const iconSize = 14;
+    doc.addImage(warningImg, "PNG", x, y - iconSize + 4, iconSize, iconSize);
+    x += iconSize + 6;
+  }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.dark);
+  doc.text(`NIF: ${nif}`, x, y + 4);
+  doc.setTextColor(...BRAND.text);
+  return y + 22;
+}
 
-  let y = lastY + 20;
-  const est = 16 + notes.length * 14;
-  if (y + est > ph - 50) {
+/** Caixa de destaque (callout) para notas dos produtos / instrucoes de entrega. */
+function renderCallout(
+  doc: jsPDF,
+  y: number,
+  opts: {
+    title: string;
+    items: string[];
+    bg: [number, number, number];
+    border: [number, number, number];
+    accent: [number, number, number];
+    icon?: string | null;
+  },
+): number {
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const mx = 40;
+  const boxW = pw - mx * 2;
+  const barW = 4;
+  const padX = 12;
+  const padY = 12;
+  const textX = mx + barW + padX;
+  const textMaxW = boxW - barW - padX * 2;
+  const titleH = 15;
+  const lineH = 14;
+
+  // Pre-calcula as linhas do corpo (quebra de texto)
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  const wrapped: string[] = [];
+  opts.items.forEach((it) => {
+    const lines = doc.splitTextToSize(`•  ${it}`, textMaxW) as string[];
+    wrapped.push(...lines);
+  });
+
+  const boxH = padY + titleH + wrapped.length * lineH + padY - 4;
+
+  if (y + boxH > ph - 45) {
     doc.addPage();
     y = 40;
   }
 
-  // Warning icon + Label
-  let labelX = mx;
-  if (warningImg) {
-    const iconSize = 14;
-    doc.addImage(warningImg, "PNG", mx, y - iconSize + 2, iconSize, iconSize);
-    labelX = mx + iconSize + 4;
-  }
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...BRAND.green);
-  doc.text("NOTAS INTERNAS", labelX, y);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(...BRAND.text);
+  // Caixa arredondada com contorno
+  doc.setFillColor(...opts.bg);
+  doc.setDrawColor(...opts.border);
+  doc.setLineWidth(0.75);
+  doc.roundedRect(mx, y, boxW, boxH, 5, 5, "FD");
+  // Barra de acento a esquerda
+  doc.setFillColor(...opts.accent);
+  doc.rect(mx, y + 3, barW, boxH - 6, "F");
 
-  const lines: string[] = [];
-  for (const note of notes) {
-    const wrapped = doc.splitTextToSize(`• ${note}`, maxW) as string[];
-    lines.push(...wrapped);
+  // Titulo (com icone opcional)
+  const titleY = y + padY + 4;
+  let titleX = textX;
+  if (opts.icon) {
+    const iconSize = 13;
+    doc.addImage(opts.icon, "PNG", textX, titleY - iconSize + 3, iconSize, iconSize);
+    titleX = textX + iconSize + 5;
   }
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(lines, mx, y + 18);
+  doc.setTextColor(...opts.accent);
+  doc.text(opts.title, titleX, titleY);
+
+  // Corpo
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.setTextColor(...BRAND.text);
+  doc.text(wrapped, textX, titleY + lineH + 2);
+
+  return y + boxH + 12;
 }
 
 /** Shared autoTable theme */
@@ -405,15 +490,6 @@ export async function exportCustomerSheetsPdf(
       infoY += 14;
     }
 
-    // NIF — destacado (usado para faturacao)
-    if (c?.nif) {
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(...BRAND.dark);
-      doc.text(`NIF: ${c.nif}`, 52, infoY);
-      infoY += 14;
-    }
-
     doc.setTextColor(...BRAND.text);
 
     // Aggregate products
@@ -455,7 +531,52 @@ export async function exportCustomerSheetsPdf(
       },
     });
 
-    renderNotesBlock(doc, collectDisplayNotes(custOrders), warningImg);
+    // Estrutura por baixo da tabela de produtos:
+    //  1) NIF (icone de atencao) imediatamente por baixo da ultima linha;
+    //  2) notas dos produtos (estado/qualidade) logo a seguir ao "Peso Real";
+    //  3) instrucoes de entrega (horario, onde deixar, morada alternativa);
+    //  4) eventuais notas internas restantes.
+    let blockY = (((doc as any).lastAutoTable?.finalY as number) ?? startY + 70) + 18;
+
+    if (c?.nif) {
+      blockY = renderNifLine(doc, blockY, c.nif, warningImg);
+    }
+
+    const segments = collectNoteSegments(custOrders);
+    const productNotes = segments.filter((s) => classifyNote(s) === "product");
+    const deliveryNotes = segments.filter((s) => classifyNote(s) === "delivery");
+    const internalNotes = segments.filter((s) => classifyNote(s) === "internal");
+
+    if (productNotes.length) {
+      blockY = renderCallout(doc, blockY, {
+        title: "Notas dos produtos",
+        items: productNotes,
+        bg: BRAND.productBg,
+        border: BRAND.productBorder,
+        accent: BRAND.green,
+      });
+    }
+
+    if (deliveryNotes.length) {
+      blockY = renderCallout(doc, blockY, {
+        title: deliveryNotes.length > 1 ? "Instruções de entrega" : "Instrução de entrega",
+        items: deliveryNotes,
+        bg: BRAND.deliveryBg,
+        border: BRAND.deliveryBorder,
+        accent: BRAND.deliveryAccent,
+        icon: warningImg,
+      });
+    }
+
+    if (internalNotes.length) {
+      blockY = renderCallout(doc, blockY, {
+        title: "Notas internas",
+        items: internalNotes,
+        bg: BRAND.stripe,
+        border: BRAND.border,
+        accent: BRAND.muted,
+      });
+    }
 
     // Referencia interna da importacao IA no rodape da pagina do cliente
     const importRefIds = collectImportRefIds(custOrders);
